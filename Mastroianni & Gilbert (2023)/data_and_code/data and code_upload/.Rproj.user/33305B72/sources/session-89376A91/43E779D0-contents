@@ -1,0 +1,192 @@
+
+require(ggplot2)
+require(plyr)
+require(psych)
+require(tidyverse)
+require(lme4)
+require(lmerTest)
+require(plyr)
+require(emmeans)
+require(rstanarm)
+require(bayestestR)
+require(BayesFactor)
+require(bayesplot)
+require(Bolstad)
+require(logspline)
+
+setwd("~/Documents/School/Harvard/Research/changing minds/incentive")
+dat <- read.csv("incentive.csv")
+theme_black = function(base_size = 30, base_family = "") {
+  
+  theme_grey(base_size = base_size, base_family = base_family) %+replace%
+    
+    theme(
+      # Specify axis options
+      axis.line = element_blank(),  
+      axis.text.x = element_text(size = base_size*0.8, color = "white", lineheight = 0.9),  
+      axis.text.y = element_text(size = base_size*0.8, color = "white", lineheight = 0.9),  
+      axis.ticks = element_line(color = "white", size  =  0.2),  
+      axis.title.x = element_text(size = base_size, color = "white", margin = margin(0, 10, 0, 0)),  
+      axis.title.y = element_text(size = base_size, color = "white", angle = 90, margin = margin(0, 10, 0, 0)),  
+      axis.ticks.length = unit(0.3, "lines"),   
+      # Specify legend options
+      legend.background = element_rect(color = NA, fill = "black"),  
+      legend.key = element_rect(color = "white",  fill = "black"),  
+      legend.key.size = unit(1.2, "lines"),  
+      legend.key.height = NULL,  
+      legend.key.width = NULL,      
+      legend.text = element_text(size = base_size*0.8, color = "white"),  
+      legend.title = element_text(size = base_size*0.8, face = "bold", hjust = 0, color = "white"),  
+      legend.position = "right",  
+      legend.text.align = NULL,  
+      legend.title.align = NULL,  
+      legend.direction = "vertical",  
+      legend.box = NULL, 
+      # Specify panel options
+      panel.background = element_rect(fill = "black", color  =  NA),  
+      panel.border = element_rect(fill = NA, color = "white"),  
+      panel.grid.major = element_line(color = "grey35"),  
+      panel.grid.minor = element_line(color = "grey20"),  
+      panel.margin = unit(0.5, "lines"),   
+      # Specify facetting options
+      strip.background = element_rect(fill = "grey30", color = "grey10"),  
+      strip.text.x = element_text(size = base_size*0.8, color = "white"),  
+      strip.text.y = element_text(size = base_size*0.8, color = "white",angle = -90),  
+      # Specify plot options
+      plot.background = element_rect(color = "black", fill = "black"),  
+      plot.title = element_text(size = base_size*1.2, color = "white"),  
+      plot.margin = unit(rep(1, 4), "lines")
+      
+    )
+  
+}
+
+paste3 <- function(...,sep=", ") {
+  L <- list(...)
+  L <- lapply(L,function(x) {x[is.na(x)] <- ""; x})
+  ret <-gsub(paste0("(^",sep,"|",sep,"$)"),"",
+             gsub(paste0(sep,sep),sep,
+                  do.call(paste,c(L,list(sep=sep)))))
+  is.na(ret) <- ret==""
+  ret
+}
+
+####exclusions####
+dat$zip <- as.factor(dat$zip)
+dat$inclusion <- NULL
+dat$reason <- NULL
+dat$inclusion[dat$kindergarten != "Kindergarten"] <- "exclude"
+dat$inclusion[dat$ohtwoone != "2138"] <- "exclude"
+dat$inclusion[dat$turkey != "Eating turkey"] <- "exclude"
+dat$reason[dat$inclusion == "exclude"] <- "english"
+table(dat$inclusion)
+
+dim(dat)
+dat$inclusion[dat$check != "Other"] <- "exclude"
+dat$reason[dat$check != "Other"] <- "check"
+table(dat$inclusion)
+dat <- dat[is.na(dat$inclusion),]
+
+dat$inclusion[dat$check_4_TEXT == ""] <- "exclude"
+table(dat$inclusion)
+dat <- dat[is.na(dat$inclusion),]
+dim(dat)
+
+##year check
+dat$year_born <- as.numeric(dat$year_born)
+dat$year_age <- 2023 - dat$year_born
+dat$age_check <- NULL
+for(i in 1:nrow(dat)){
+  if(is.na(dat$year_age[i])){dat$age_check[i] <- "fail"}
+  else if((dat$year_age[i] - dat$age[i]) > 1 | (dat$year_age[i] - dat$age[i]) < 0){
+    dat$age_check[i] <- "fail"
+  } else{dat$age_check[i] <- "pass"}
+}
+table(dat$age_check)
+dat$inclusion[dat$age_check == "fail"] <- "exclude"
+dat$reason[dat$age_check == "fail"] <- "age_check"
+
+table(dat$inclusion)
+dat <- dat[is.na(dat$inclusion),]
+dim(dat)
+
+##re-report demos
+dim(dat)
+table(dat$gender)
+summary(dat$age[dat$age < 1000])
+prop.table(table(dat$race))
+
+####data processing####
+dat$condition <- rep("incentive", times = nrow(dat))
+dat$condition2 <- mapvalues(dat$condition, from = c("","gun_n_data","gun_n_identity","gun_n_self","gun_n_social","gun_y_data","gun_y_identity","gun_y_self","gun_y_social","skip"),
+                            to = c("","data","identity","self","social","data","identity","self","social","control"))
+dat$predict <- paste0(dat$gun_n_pre_incentive,dat$gun_y_pre_incentive)
+dat$predict <- mapvalues(dat$predict, from = c("1 (not at all)","7 (very much)"),
+                         to = c(1,7))
+dat$predict <- as.numeric(dat$predict)
+
+##read in reader reports, combine
+setwd("~/Documents/School/Harvard/Research/changing minds/big study")
+readers <- read.csv("readers_melt.csv")
+readers <- readers[readers$item == "gun",]
+readers$predict <- readers$actual
+readers$condition <- rep("reader",times = nrow(readers))
+readers_small <- data.frame(readers$predict,readers$condition)
+names(readers_small) <- c("predict","condition")
+big <- bind_rows(dat, readers_small)
+
+####analysis####
+big$condition <- as.factor(big$condition)
+big$condition <- relevel(big$condition, ref = "reader")
+condition_mod <- lm(predict ~ condition, data = big)
+summary(condition_mod)
+
+t.test(predict ~ condition, data = big)
+sd(big$predict[big$condition == "reader"])
+sd(big$predict[big$condition == "incentive"], na.rm = TRUE)
+cohen.d(big$predict, big$condition)
+
+means <- emmeans(condition_mod, specs = ~ condition)
+means
+contr <- contrast(means, method = "pairwise", adjust = "holm")
+contr
+confint(contr)
+
+condition_mod2 <- lm(predict ~ condition2, data = big[big$condition2 != "reader",])
+summary(condition_mod)
+
+means <- emmeans(condition_mod2, specs = ~ condition2)
+means
+contr <- contrast(means, method = "pairwise", adjust = "holm")
+contr
+confint(contr)
+
+####plot####
+condition_plot <- ggplot(big, aes(x = condition, y = predict)) +
+  geom_point(color = "gray", alpha = .4, position = position_jitter(width = .2, height = .2)) +
+  stat_summary(fun.data = "mean_cl_boot") +
+  coord_cartesian(ylim = c(1,7)) +
+  ylab("prediction/rating") +
+  xlab("condition")
+
+condition_plot <- ggplot(dat, aes(x = condition2, y = predict, color = gun)) +
+  stat_summary(fun.data = "mean_cl_boot", position = position_dodge(width = .2)) +
+  coord_cartesian(ylim = c(1,7)) +
+  ylab("prediction") +
+  xlab("condition")
+
+table(dat$condition2)
+
+####bayesian####
+condition_bayes <- stan_glm(predict ~ condition, data = big, iter = 3000)
+describe_posterior(condition_bayes)
+summary(condition_bayes)
+
+bayesfactor(condition_bayes)
+options(scipen = 999)
+
+condition_bayes2 <- stan_glm(predict ~ condition2, data = big[big$condition2 != "reader",], iter = 3000)
+describe_posterior(condition_bayes2)
+summary(condition_bayes2)
+
+bayesfactor(condition_bayes2)

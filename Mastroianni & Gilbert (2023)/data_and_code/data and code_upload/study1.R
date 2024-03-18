@@ -1,0 +1,108 @@
+##R code for analyses in Study 1 of "The Illusion of Moral Decline" (Mastroianni & Gilbert, 2023)
+
+#####IMPORTANT NOTES#####
+##We cannot provide most of the data necessary to run this code because it's proprietary
+##And the owners of the data could sue us for posting it
+##We've kept data in that has been posted publicly by Pew, so you can at least see that.
+##And we're including all the code so that you can see exactly how the analyses were done.
+##But note that because you don't have the same data we used, 
+##many of these analyses **will not run** and **none of them will return the same results as in the paper**
+
+
+require(psych)
+require(ggplot2)
+require(lmerTest)
+require(emmeans)
+require(dplyr)
+require(rstanarm)
+require(BayesFactor)
+require(bridgesampling)
+require(bayestestR)
+
+dat <- read.csv("study1.csv")
+
+####descriptives####
+dim(dat)
+sum(dat$N, na.rm = TRUE)
+
+#####number of items where majority perceives decline####
+nrow(dat[dat$worse > 50,])/nrow(dat)
+
+##weighted approach (see supplement)
+weighted.mean(dat$worse[!is.na(dat$N)], w = dat$N[!is.na(dat$N)], na.rm = T)
+
+####year####
+year_mod <- lm(worse ~ year, data = dat)
+summary(year_mod)
+
+year_mod_bayes <- stan_glm(worse ~ year, data = dat)
+summary(year_mod_bayes)
+bayesfactor(year_mod_bayes)
+
+####time comparison####
+##year_comp = how far back are you asked about?
+##so 25 = you're comparing today to 25 years ago
+##questions that didn't have a specific time period (i.e. "used to be") have NA here
+comp <- dat[!is.na(dat$year_comp),]
+names(comp)
+dim(comp)
+
+##do people perceive more decline over longer periods?
+mod_comp <- lm(worse ~ year_comp, data = comp)
+summary(mod_comp)
+confint(mod_comp)
+##yes
+
+####non-US####
+nonus <- read.csv("study1_non_us.csv")
+dim(nonus)
+
+nrow(nonus[nonus$worse > 50,])/nrow(nonus)
+range(nonus$year)
+sum(nonus$N, na.rm = T)
+
+##all
+all <- bind_rows(dat, nonus)
+all$year_comp
+
+####time comparison####
+##year_comp = how far back are you asked about?
+##so 25 = you're comparing today to 25 years ago
+##questions that didn't have a specific time period (i.e. "used to be") have NA here
+comp <- all[!is.na(all$year_comp),]
+names(comp)
+dim(comp)
+##do people perceive more decline over longer periods?
+mod_comp <- lm(worse ~ year_comp, data = comp)
+summary(mod_comp)
+confint(mod_comp)
+
+#R version 4.0.2 (2020-06-22)
+#Platform: x86_64-apple-darwin17.0 (64-bit)
+#Running under: macOS  10.16
+
+#Matrix products: default
+#LAPACK: /Library/Frameworks/R.framework/Versions/4.0/Resources/lib/libRlapack.dylib
+
+#locale:
+#  [1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+#attached base packages:
+#  [1] stats     graphics  grDevices utils     datasets  methods   base     
+
+#other attached packages:
+#  [1] emmeans_1.4.7   lsr_0.5         jtools_2.2.0    psych_1.9.12.31 tidyr_1.1.0     lmerTest_3.1-2 
+#[7] lme4_1.1-23     Matrix_1.2-18   plyr_1.8.6      dplyr_1.0.7     ggplot2_3.3.0  
+
+#loaded via a namespace (and not attached):
+#  [1] statmod_1.4.34      tidyselect_1.1.0    xfun_0.14           purrr_0.3.4         pander_0.6.5       
+#[6] splines_4.0.2       lattice_0.20-41     colorspace_1.4-1    vctrs_0.3.8         generics_0.0.2     
+#[11] htmltools_0.5.0     yaml_2.2.1          utf8_1.1.4          rlang_0.4.11        pillar_1.6.3       
+#[16] nloptr_1.2.2.1      glue_1.4.1          withr_2.2.0         DBI_1.1.0           lifecycle_1.0.1    
+#[21] munsell_0.5.0       gtable_0.3.0        mvtnorm_1.1-0       coda_0.19-3         evaluate_0.14      
+#[26] knitr_1.28          parallel_4.0.2      fansi_0.4.1         Rcpp_1.0.4.6        xtable_1.8-4       
+#[31] scales_1.1.1        mnormt_1.5-7        packrat_0.7.0       digest_0.6.25       numDeriv_2016.8-1.1
+#[36] grid_4.0.2          tools_4.0.2         magrittr_1.5        tibble_3.0.1        crayon_1.3.4       
+#[41] pkgconfig_2.0.3     ellipsis_0.3.2      MASS_7.3-51.6       estimability_1.3    assertthat_0.2.1   
+#[46] minqa_1.2.4         rmarkdown_2.1       rstudioapi_0.11     R6_2.4.1            boot_1.3-25        
+#[51] nlme_3.1-148        compiler_4.0.2

@@ -1,0 +1,652 @@
+---
+title: "R Notebook"
+output: html_document
+---
+
+```{r setup, include = FALSE}
+
+library(tidyverse)
+library(haven)
+library(lme4)
+library(emmeans)
+library(broom.mixed)
+library(modelsummary)
+library(psych)
+library(kableExtra)
+library(cowplot)
+library(ggrepel)
+```
+
+# Read and clean data:
+```{r data}
+
+emtns <- read_sav("../data/emtns-clean-data.sav")
+
+emtns <- emtns %>% 
+  mutate(
+    # Individual level autonomy:
+    au_ind = important_children_1 + important_children_7 - 
+      important_children_8 - important_children_10,
+    gender = as_factor(gender),
+    behavior = as_factor(behavior)
+    ) %>% 
+  zap_labels() %>% 
+  group_by(sitecountry) %>% 
+  # Country level autonomy:
+  mutate(au_cntry = mean(au_ind, na.rm = TRUE)) %>% 
+  ungroup() 
+
+
+emtns_gl_sc <- emtns %>% 
+  group_by(behavior) %>% 
+  mutate_at(vars(au_ind, au_cntry, 
+                 starts_with("hdi"), 
+                 starts_with("TL"),
+                 approp, approp_adj, age), 
+            ~scale(.)[,1]) %>% 
+  ungroup()
+
+```
+
+# Participants and procedure:
+```{r descript}
+
+sample <- emtns %>% 
+  filter(behavior %in% c("Confrontation", "Ostracism", "Gossip")) %>% 
+  distinct(sitecountry, sample, id, age, gender)
+
+sample %>% 
+  summarise(n = n(), 
+            female = mean(gender == "Female"),
+            male = mean(gender == "Male"),
+            mean(sample == "Student"),
+            mean(age), sd(age))
+
+```
+
+```{r cntry_n}
+
+sample %>% 
+  count(sitecountry) %>% 
+  summarise(min(n), max(n), median(n))
+
+```
+
+# Results:
+```{r}
+
+# Correlation between angry and disgusted is relatively low.
+
+emtns %>% 
+  group_by(scenario) %>% 
+  summarise(r_spearman = cor(angry, disgusted),
+            r_polychor = psych::polychoric(tibble(angry, disgusted))$rho[2,1]) %>% 
+  summarise(mean(r_polychor), mean(r_spearman))
+
+```
+
+## Hypothesis 1, preregistered analysis:
+```{r}
+
+# This code runs 45 models simultaneously and therefore takes time:
+
+by_behav_emtn <- emtns_gl_sc %>%
+  filter(!behavior %in% c("Violation", "Nothing")) %>%
+  gather(emo_type, emo, happy:another_negative) %>%
+  group_by(behavior, emo_type) %>%
+  nest()
+
+by_behav_emtn <- by_behav_emtn %>%
+  mutate(mod = map(data, ~lmer(approp ~ emo + gender + age +
+                                 (1 + emo|sitecountry/id), .x,
+                               control = lmerControl(optimizer = "bobyqa"))))
+
+pl_data <- by_behav_emtn %>%
+  mutate(coef = map(mod, tidy, effects = "fixed", conf.int = TRUE)) %>% 
+  unnest(coef) %>% 
+  filter(effect == "fixed", 
+         term == "emo") %>% 
+  ungroup() %>% 
+  select(-data, -mod) %>% 
+  mutate(emo_type = str_to_sentence(emo_type), 
+         emo_type = str_replace(emo_type, "_", " "), 
+         emo_type = factor(emo_type, levels = unique(emo_type)),
+         emo_type = fct_relevel(emo_type, 
+                                "Another negative", 
+                                "Another positive"),
+         behavior = fct_relevel(behavior, "Confrontation", "Ostracism"), 
+         category = ifelse(emo_type %in% c("Angry", "Disgusted"), 1, 2)) 
+
+pl_data %>% 
+  filter(emo_type %in% c("Angry", "Disgusted")) %>% 
+  mutate(est = sprintf("%.2f [%.2f, %.2f] for %s", estimate, conf.low, conf.high, behavior)) %>% 
+  pull(est)
+
+```
+
+Panel A:
+```{r}
+
+panel_a <- pl_data %>% 
+  mutate(emo_type = fct_relevel(emo_type, 
+                            "Another negative", 
+                            "Another positive", 
+                            "Happy", 
+                            "Sad", 
+                            "Surprised", 
+                            "Afraid", 
+                            "Satisfied")) %>% 
+  ggplot(aes(emo_type, estimate, 
+             ymin = conf.low, ymax = conf.high,
+             color = behavior)) +
+  geom_pointrange(position = position_dodge(width = .5)) +
+  geom_hline(yintercept = 0, color = "grey20") +
+  scale_color_grey()+
+  labs(x = NULL, color = NULL) +
+  coord_flip() +
+  theme(strip.text = element_blank())
+
+```
+
+All emotions in the same model:
+```{r}
+
+by_behavior <- emtns_gl_sc %>%
+  filter(!behavior %in% c("Violation", "Nothing")) %>%
+  group_nest(behavior)
+
+by_behavior <- by_behavior %>%
+  mutate(mod = map(data, ~lmer(approp ~ angry + disgusted + happy +
+                                 sad + surprised + afraid + satisfied +
+                                 another_positive + another_negative +
+                                 gender + age + (1|sitecountry/id), .x,
+                               control = lmerControl(optimizer = "bobyqa"))))
+
+pl_data <- by_behavior %>%
+  mutate(coef = map(mod, tidy, effects = "fixed", conf.int = TRUE)) %>% 
+  unnest(coef) %>% 
+  filter(!term %in% c("(Intercept)", "genderFemale","age")) %>% 
+  ungroup() %>% 
+  mutate(term = str_to_sentence(term), 
+         term = str_replace(term, "_", " "), 
+         term = factor(term, levels = unique(term)),
+         term = fct_relevel(term, 
+                                "Another negative", 
+                                "Another positive"),
+         behavior = fct_relevel(behavior, "Confrontation", "Ostracism"), 
+         category = ifelse(term %in% c("Angry", "Disgusted"), 1, 2)) 
+
+```
+
+Panel B:
+```{r}
+
+panel_b <- pl_data %>% 
+  mutate(term = fct_relevel(term, 
+                            "Another negative", 
+                            "Another positive", 
+                            "Happy", 
+                            "Sad", 
+                            "Surprised", 
+                            "Afraid", 
+                            "Satisfied", 
+                            "Disgusted")) %>% 
+  ggplot(aes(term, estimate, 
+             ymin = conf.low, ymax = conf.high,
+             color = behavior)) +
+  geom_pointrange(position = position_dodge(width = .5)) +
+  geom_hline(yintercept = 0, color = "grey20") +
+  scale_color_grey()+
+  labs(x = NULL, y = "Estimate", color = NULL) +
+  coord_flip() +
+  theme(strip.text = element_blank())
+
+```
+
+```{r fig1, fig.width=8, fig.height=4, fig.cap="Figure 1. Standardized coefficients of different emotions as predictors of the perceived appropriateness of informal sanctions. A coefficient of 0.5 means that participants who reported the emotion for the scenario tended to perceive the sanction for the scenario as 0.5 standard deviations more appropriate than participants who did not report the emotion. Panel A: Effects estimated separately for each emotion (Model 1). Panel B: Independent effects of each emotion when all emotions were simultaneously included as predictors (unlike Model 1, this model does not include random slopes because that model becomes too complex to estimate)."}
+
+(pl_comb <- plot_grid(
+    panel_a + 
+      theme_bw(base_size = 14) +
+      theme(legend.position = c(.73, .23), 
+            legend.text = element_text(size = 10), 
+            legend.margin = margin()) +
+      labs(y = "Estimate", x = NULL), 
+    panel_b + 
+      theme_bw(base_size = 14) +
+      theme(legend.position = c(.73, .23), 
+            legend.text = element_text(size = 10), 
+            legend.margin = margin()) +
+      labs(y = "Estimate", x = NULL), 
+    labels = c("a", "b") 
+  ))
+
+# ggsave("../figures/fig1_effects-of-emotions.eps", width = 8, height = 4)
+# ggsave("../figures/fig1_effects-of-emotions.jpeg", width = 8, height = 4, dpi = 350)
+
+```
+
+## Additional analyses related to Hypothesis 1 (not preregistered):
+```{r}
+
+by_cntry_behav <- emtns_gl_sc %>%
+  filter(!behavior %in% c("Nothing", "Violation")) %>% 
+  group_nest(sitecountry, behavior) 
+
+by_cntry_behav <- by_cntry_behav %>%
+  mutate(mod = map(data, ~lmer(approp ~ angry + disgusted + gender + age + (1|id), .x)))
+
+by_cntry_coef <- by_cntry_behav %>%
+  mutate(coef = map(mod, tidy, effects = "fixed", conf.int = TRUE)) %>%
+  unnest(coef) %>%
+  ungroup()
+
+```
+
+```{r fig2, fig.width = 8, fig.height = 3, fig.cap= "Figure 2. Scatterplots of the effects of anger (y-axis) and disgust (x-axis) on ratings of sanctions reflected in standardized coefficients. Effects were estimated separately in each of the 56 countries for each type of sanction (confrontation, ostracism, and gossip) in models that included random intercepts for individuals and adjusted for gender and age. Dots (vs. triangles) that is above (vs. below) the diagonal y = x represent countries where the effect of anger was larger (vs. smaller) than the effect of disgust."}
+
+pl_data <- by_cntry_coef %>% 
+  select(sitecountry, behavior, term, estimate) %>% 
+  filter(term != "(Intercept)") %>% 
+  spread(term, estimate) %>% 
+  mutate(dist = angry - disgusted) 
+  
+axis_lim_data <- pl_data %>% 
+  group_by(behavior) %>% 
+  summarise(min = min(c(angry, disgusted)), 
+            max = max(c(angry, disgusted))) %>% 
+  gather("type", "lims", min, max) %>% 
+  mutate(angry = lims, disgusted = lims)
+  
+pl_data %>% 
+  mutate(behavior = fct_relevel(behavior, "Confrontation", "Ostracism"), 
+         dist = ifelse(angry > disgusted, "Larger", "Smaller")) %>% 
+  ggplot(aes(disgusted, angry)) +
+  geom_abline() +
+  geom_point(aes(shape = dist)) +
+  facet_wrap(~behavior, scales = "free") +
+  geom_blank(data = axis_lim_data) +
+  theme_bw(base_size = 14) +
+  theme(legend.position = "none", panel.grid = element_blank()) +
+  labs(x = "Effect of disgust", y = "Effect of anger")
+
+ # ggsave("../figures/fig2_anger-vs-disgust.jpeg", width = 8, height = 3, dpi = 350)
+ # ggsave("../figures/fig2_anger-vs-disgust.eps", width = 8, height = 3)
+ 
+```
+
+## Hypothesis 2, preregistered analysis:
+```{r models_au_interaction}
+
+by_behav_emtn_int <- emtns_gl_sc %>%
+  filter(!behavior %in% c("Violation", "Nothing")) %>%
+  gather(emo_type, emo, c(angry, disgusted)) %>%
+  group_nest(behavior, emo_type)
+
+by_behav_emtn_int <- by_behav_emtn_int %>%
+  mutate(mod_ind_cntr = map(data, ~lmer(approp ~ emo*au_ind + emo*au_cntry +
+                                          gender + age +
+                                          (1 + emo|sitecountry:id) +
+                                          (1 + emo + au_ind + emo:au_ind|sitecountry),
+                                        .x,
+                                        control = lmerControl(optimizer = "bobyqa"))),
+         mod_hdi_cntr = map(data, ~lmer(approp ~ emo*au_ind + emo*au_cntry +
+                                          gender + age + emo*hdi_inc + emo*hdi_edu +
+                                          (1 + emo|sitecountry:id) +
+                                          (1 + emo + au_ind + emo:au_ind|sitecountry),
+                                        .x,
+                                        control = lmerControl(optimizer = "bobyqa"))))
+
+
+
+```
+
+```{r fig3, fig.width=8, fig.height=3.5}
+
+by_behav_emtn_int_coef <- by_behav_emtn_int %>% 
+  select(-data) %>% 
+  gather(version, model, mod_ind_cntr, mod_hdi_cntr) %>% 
+  mutate(coef = map(model, tidy, conf.int = TRUE, effects = "fixed")) %>% 
+  unnest(coef) 
+
+
+plot_data <- by_behav_emtn_int_coef %>% 
+  select(-model) %>% 
+  filter(term %in% c("emo:au_cntry", "emo:au_ind")) %>%
+  mutate(emo_type = str_to_sentence(emo_type),
+         term = str_replace_all(term, c(
+           "emo:au_cntry" = "Emo x Au_cntry", 
+           "emo:au_ind" = "Emo x Au_ind"
+         )),
+         version = factor(version,
+                          levels = c("mod_ind_cntr", "mod_hdi_cntr"),
+                          labels = c("(2.1)", 
+                                     "(2.2)")),
+         behavior = fct_relevel(behavior, "Confrontation", "Ostracism")) 
+
+
+plot_data %>%
+  ggplot(aes(term, estimate,
+             ymin = conf.low, ymax = conf.high,
+             color = version, shape = emo_type)) +
+  geom_pointrange(position = position_dodge(width = .5)) +
+  scale_color_grey() +
+  scale_shape_manual(values = c(15, 16)) +
+  geom_hline(yintercept = 0, color = "grey20") +
+  labs(x = NULL, y = "Standardized coefficient", color = "Model", shape = "Emotion") +
+  coord_flip() +
+  facet_wrap(~behavior) +
+  theme_bw(base_size = 14)
+
+# ggsave("../figures/fig3_interactions-with-autonomy.jpeg", width = 8, height = 3.5, dpi = 350)
+# ggsave("../figures/fig3_interactions-with-autonomy.eps", width = 8, height = 3.5)
+
+```
+
+## Additional non-preregistered analyses related to Figure 3
+
+```{r fig4, fig.width=8, fig.height=3.5}
+
+by_behav_emtn_int <- by_behav_emtn_int %>%
+  mutate(mod_tl_cntr = map(data, ~lmer(approp ~ emo*au_ind +
+                                          emo*au_cntry + 
+                                          emo*TL_ind + 
+                                          emo*TL_cntry +
+                                          gender + age +
+                                          (1 + emo|sitecountry/id),
+                                        .x,
+                                        control = lmerControl(optimizer = "bobyqa"))))
+
+by_behav_tl_int_coef <- by_behav_emtn_int %>% 
+  select(-data) %>% 
+  mutate(coef = map(mod_tl_cntr, tidy, conf.int = TRUE, effects = "fixed")) %>% 
+  unnest(coef) 
+
+plot_data <- by_behav_tl_int_coef %>% 
+  select(-mod_tl_cntr) %>% 
+  filter(str_detect(term, ":")) %>%
+  mutate(emo_type = str_to_sentence(emo_type),
+         term = str_replace_all(term, c(
+           "emo:TL_cntry" = "Emo x TL_cntry", 
+           "emo:TL_ind" = "Emo x TL_ind",
+           "emo:au_ind" = "Emo x Au_ind", 
+           "emo:au_cntry" = "Emo x Au_cntry"
+         )),
+         behavior = fct_relevel(behavior, "Confrontation", "Ostracism")) 
+
+plot_data %>%
+  ggplot(aes(term, estimate,
+             ymin = conf.low, ymax = conf.high,
+             shape = emo_type)) +
+  geom_pointrange(position = position_dodge(width = .5)) +
+  scale_color_grey() +
+  scale_shape_manual(values = c(15, 16)) +
+  geom_hline(yintercept = 0, color = "grey20") +
+  labs(x = NULL, y = "Standardized coefficient", color = "Model", shape = "Emotion") +
+  coord_flip() +
+  facet_wrap(~behavior) +
+  theme_bw(base_size = 14)
+
+# ggsave("../figures/fig4_interactions-with-autonomy-and-tightness.jpeg", width = 8, height = 3.5, dpi = 350)
+# ggsave("../figures/fig4_interactions-with-autonomy-and-tightness.eps", width = 8, height = 3.5)
+
+```
+
+
+## Additional analyses related to Hypothesis 2 (not preregistered):
+```{r}
+
+by_cntry_behav_sce <- emtns_gl_sc %>%
+  mutate(approp = ifelse(behavior %in% c("Violation", "Nothing"),
+                             -approp,
+                             approp)) %>%
+  group_by(sitecountry, iso_code, au_cntry, behavior, scenario) %>%
+  nest()
+
+by_cntry_behav_sce <- by_cntry_behav_sce %>% 
+  mutate(mod = map(data, ~lm(approp ~ happy + sad + surprised + 
+                               afraid + disgusted + angry + satisfied +
+                               another_positive + another_negative, .x)))
+
+by_cntry_behav_sce <- by_cntry_behav_sce %>% 
+  mutate(rsq = map_dbl(mod, ~summary(.x)$adj.r.squared))
+
+alpha_data <- by_cntry_behav_sce %>% 
+  ungroup() %>% 
+  unite("model", behavior, scenario) %>% 
+  select(sitecountry, model, rsq) %>% 
+  spread(model, rsq)
+
+alpha(select(alpha_data, -sitecountry), check.keys =  FALSE, warnings = FALSE)$total$std.alpha
+
+```
+
+```{r fig5, fig.width = 7, fig.height = 5}
+
+pl_data <- by_cntry_behav_sce %>% 
+  group_by(sitecountry, iso_code) %>% 
+  summarise(au_cntry = mean(au_cntry), 
+            rsq = mean(rsq), 
+            .groups = "drop") 
+
+
+r_label <- sprintf("Rsq = %.2f", cor(pl_data$au_cntry, pl_data$rsq)^2)
+
+pl_data %>%
+  left_join(emtns %>% 
+              distinct(sitecountry, au_cntry) %>% 
+              rename(au_cntry_original = au_cntry)) %>% 
+  ggplot(aes(au_cntry_original, rsq)) +
+  geom_smooth(method = "lm", color = "midnightblue") +
+  geom_text_repel(aes(label = iso_code), size = 3, max.overlaps = 10) +
+  geom_point() +
+  # annotate("text", label = r_label, x = -3, y = .15) +
+  theme_classic(base_size = 14) + 
+  labs(x = "Autonomy value", y = "Emotion effect index") +
+  scale_x_continuous(limits = c(-1, 2), breaks = c(-1, -0.5, 0, 0.5, 1, 1.5, 2))
+
+# ggsave("../figures/fig5_general-effect-of-emmotion~country-autonomy.jpeg", 
+#        width = 7, height = 5, dpi = 350)
+# ggsave("../figures/fig5_general-effect-of-emmotion~country-autonomy.eps", 
+#        width = 7, height = 5)
+
+```
+
+Correlation with separate autonomy items:
+```{r}
+
+separate_items_data <- emtns %>% 
+  select(id, sitecountry, iso_code,
+         "independence" = important_children_1, 
+         "determination" = important_children_7, 
+         "religious_faith" = important_children_8, 
+         "obedience" = important_children_10, 
+         au_ind) %>% 
+  distinct() %>%
+  group_by(sitecountry, iso_code) %>% 
+  summarise(across(c(independence, determination, religious_faith, obedience), mean),
+            au_cntry = mean(au_ind))
+
+by_cntry_summary <- left_join(pl_data, select(separate_items_data, -au_cntry))
+
+by_cntry_summary %>% 
+  select(rsq, independence:obedience) %>% 
+  cor() %>% 
+  round(2)
+
+```
+
+# Supplementary materials:
+
+## Sample characteristics in each country:
+```{r table_s1}
+
+sample %>% 
+  group_by(sitecountry) %>% 
+  summarise(N = n(),
+            `% female` = sprintf("%.0f", mean(gender == "Female")*100), 
+            `Age M (SD)` = sprintf("%.1f (%.1f)", mean(age), sd(age)),
+            `% students` = sprintf("%.0f", mean(sample == "Student")*100)) %>% 
+  kbl(caption = "Supplementary Table 1. Country sample characteristics.") %>% 
+  kable_classic()
+  
+```
+
+## Autonomy means, sorted from highest to lowest, and separate index components scores for each of the 57 countries:
+```{r table_s2}
+
+separate_items_data %>% 
+  select(Country = sitecountry, 
+         Au_cntry = au_cntry, 
+         Independence = independence,
+         Determination = determination,
+         religious_faith = religious_faith,
+         Obedience = obedience) %>% 
+  arrange(desc(Au_cntry)) %>% 
+  kbl(digits = 2)
+
+```
+
+## Average proportion of respondents who selected "angry"/"disgusted": 
+```{r}
+
+emtns %>% 
+  select(id, sitecountry, gender, age, sample, scenario, behavior, approp, happy:another_negative, hdi:hdi_inc, au_ind, au_cntry) %>% 
+  pivot_longer(cols = c(happy:another_negative),
+               names_to = "emo_type",
+               values_to = "emo_value") %>% 
+  filter(emo_type %in% c("angry", "disgusted")) %>% 
+  group_by(sitecountry, scenario, emo_type) %>% 
+  summarise(prop = mean(emo_value)) %>% 
+  spread(emo_type, prop) %>% 
+  group_by(scenario) %>% 
+  summarise(mean_angry = mean(angry),
+            sd_angry = sd(angry),
+            mean_disgusted = mean(disgusted),
+            sd_disgusted = sd(disgusted)) %>% 
+  mutate(mean_angry = paste0(round(mean_angry, 2), " (", round(sd_angry, 2), ")"),
+         mean_disgusted = paste0(round(mean_disgusted, 2), " (", round(sd_disgusted, 2), ")")) %>% 
+  select(-sd_angry, -sd_disgusted) %>% 
+  rename(Anger = mean_angry, 
+         Disgust = mean_disgusted,
+         Scenario = scenario) %>% 
+  mutate(Scenario = case_when(Scenario == "sce1" ~ "Listening to music on headphones at a funeral", 
+                              Scenario == "sce2" ~ "Sleeping in a restaurant", 
+                              Scenario == "sce3" ~ "Singing in a library",
+                              Scenario == "sce4" ~ "Reading a newspaper at the movies",
+                              TRUE ~ "Violating a cooperation norm")) %>% 
+  kbl()
+
+```
+
+Proportion of respondents who selected "angry"/"disgusted", by country:
+```{r}
+
+summary_emtns_by_cntry <- emtns %>%
+  select(id, sitecountry, gender, age, sample, scenario, behavior, approp, happy:another_negative, hdi:hdi_inc, au_ind, au_cntry) %>% 
+  pivot_longer(cols = c(happy:another_negative),
+               names_to = "emo_type",
+               values_to = "emo_value") %>% 
+  filter(emo_type %in% c("angry", "disgusted")) %>% 
+  group_by(sitecountry, scenario, emo_type) %>% 
+  summarise(summary = sprintf("%.2f (%.2f)", mean(emo_value), sd(emo_value)))
+
+summary_emtns_by_cntry %>% 
+  pivot_wider(names_from = c(emo_type, scenario), values_from = summary) %>% 
+  kbl(col.names = c("Country", rep(c("Anger", "Disgust"), 5))) %>% 
+  add_header_above(c(" ", 
+                     "Listening to music at a funeral" = 2, 
+                     "Sleeping in a restaurant" = 2,
+                     "Singing in a library" = 2,
+                     "Reading a newspaper at the movies" = 2,
+                     "Violating a cooperation norm" = 2
+                     )) %>% 
+  kable_classic_2()
+
+```
+
+## Average proportion of respondents who selected a given emotion:
+```{r}
+
+emtns %>% 
+  select(id, sitecountry, gender, age, sample, scenario, behavior, approp, happy:another_negative, hdi:hdi_inc, au_ind, au_cntry) %>% 
+  pivot_longer(cols = c(happy:another_negative),
+               names_to = "emo_type",
+               values_to = "emo_value") %>% 
+  group_by(scenario, emo_type) %>% 
+  summarise(prop = mean(emo_value)) %>% 
+  spread(emo_type, prop) %>% 
+  mutate_at(vars(afraid:surprised), ~round(., 2)) %>% 
+  select(happy, sad, surprised, afraid, disgusted, angry, satisfied, `Another positive` = another_positive, `Another negative` = another_negative) %>% 
+  rename_all(~str_to_title(.)) %>% 
+  mutate(Scenario = case_when(Scenario == "sce1" ~ "Listening to music on headphones at a funeral", 
+                              Scenario == "sce2" ~ "Sleeping in a restaurant", 
+                              Scenario == "sce3" ~ "Singing in a library",
+                              Scenario == "sce4" ~ "Reading a newspaper at the movies",
+                              TRUE ~ "Violating a cooperation norm")) %>% 
+  kbl()
+
+```
+
+## Differences among countries in the tendency to nominate multiple emotions:
+```{r}
+
+avg_n_emtns <- emtns %>% 
+  pivot_longer(cols = c(happy:another_negative),
+               names_to = "emo_type",
+               values_to = "emo_value") %>% 
+  # Calculate number of emotions selected per individual:
+  group_by(sitecountry, scenario, behavior, id) %>% 
+  summarise(n_emos = sum(emo_value)) %>% 
+  # Average number of emotions selected across individuals:
+  group_by(sitecountry) %>% 
+  summarise(avg_n_emos = mean(n_emos))
+
+countries_levels <- avg_n_emtns %>% 
+  arrange(avg_n_emos) %>% 
+  pull(sitecountry)
+
+grand_average <- avg_n_emtns %>% 
+  summarise(mean(avg_n_emos),
+            sd(avg_n_emos)) %>% 
+  pull(`mean(avg_n_emos)`)
+  
+emtns %>% 
+  pivot_longer(cols = c(happy:another_negative),
+               names_to = "emo_type",
+               values_to = "emo_value") %>% 
+  # Calculate number of emotions selected per individual:
+  group_by(sitecountry, scenario, behavior, id) %>% 
+  summarise(n_emos = sum(emo_value)) %>%
+  ungroup() %>% 
+  ggplot(aes(x = factor(sitecountry, levels = countries_levels), y = n_emos)) +
+  stat_summary(fun.y = mean, geom = "point") +
+  stat_summary(fun.data = mean_cl_boot, geom = "errorbar") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  geom_hline(yintercept = grand_average, color = "red") +
+  labs(y = "Average number of emotions selected", x = NULL) +
+  coord_flip() +
+  theme_bw()
+
+ggsave("../figures/sup-fig_average-number-of-emotions-selected_by-country.jpeg")
+  
+```
+
+```{r}
+
+emtns %>% 
+  mutate(n_emo_selected = rowSums(select(., happy:another_negative))) %>% 
+  distinct(sitecountry, id, scenario, n_emo_selected) %>% 
+  group_by(sitecountry) %>% 
+  summarise(avg_n_emos = mean(n_emo_selected)) %>% 
+  kbl(col.names = c("Country", 
+                    "Average number of emotions selected"),
+      digits = 2) %>% 
+  kable_classic(full_width = FALSE)
+
+```
+
+
+
+
+

@@ -1,0 +1,2002 @@
+```{r}
+library(haven)
+library(car)
+library(tidyr)
+library(plyr)
+library(dplyr)
+library(zoo)
+library(labelled)
+library(Hmisc)
+library(apaTables)
+library(psych)
+library(tidyverse)
+library(pastecs)
+library(lme4)
+library(lmerTest)
+library(jtools)
+library(effsize)
+library(reshape)
+library(lsmeans)
+library(emmeans)
+library(r2mlm)
+library(r2glmm)
+library(broom.mixed)
+library(GPArotation)
+library(ggplot2)
+library(boot)
+library(QuantPsyc)
+library(ggthemes)
+library(RColorBrewer)
+library(cowplot)
+library(forestplot)
+library(knitr)
+library(magrittr)
+library(pwr)
+library(TOSTER)
+
+library(dygraphs)
+library(xts)          # To make the convertion data-frame / xts format
+library(tidyverse)
+library(lubridate)
+library(stringr)
+
+```
+
+```{r, include=FALSE}
+#### set global options ####
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, results = FALSE, fig.show='hide', message = FALSE)
+
+#turn off scientific notation and round to 3 decimals
+options(scipen = 999, digits = 3)
+```
+
+
+```{r}
+####Notes on the codes in this file####
+```
+
+We use lmer to test all group effects
+The group (variable named 'cond') is coded as follow: 1 = Controlling, 2 = Neutral, 3 = Autonomy support
+So lmer will give dummy code cond2 (comparing Neutral with Controlling) and cond3 (comparing Autonomy support with Controlling)
+
+Our effects of interest are the two fixed effects cond2 and cond3; COUNID is the grouping variables for countries
+We use summary() function to get the R2 for all fixed effects
+and R2beta() function to get semi-partial R2 for each fixed effects. 
+Semi-partial R2 will be used to calculate semi-partial R for each fixed effects,
+which will be converted to r - since we preregistered that we are only interested in
+any effect sizes of |r| > .025
+
+
+```{r}
+#### download data sets ####
+
+### ### ### ### ###
+### SDT DATA
+### ### ### ### ### 
+SDTdf <- read_csv("SDT combined data.csv")
+
+# recode condition
+SDTdf$cond[SDTdf$condition == 1] <- 3 #Autonomy support
+SDTdf$cond[SDTdf$condition == 2] <- 1 #Controlling
+SDTdf$cond[SDTdf$condition == 3] <- 2 #Neutral
+
+# recode gender
+SDTdf$gender[SDTdf$gender == 1] <- "Male"
+SDTdf$gender[SDTdf$gender == 2] <- "Female"
+SDTdf$gender[SDTdf$gender == 3] <- "Other"
+SDTdf$gender[SDTdf$gender == 4] <- "Other"
+SDTdf$gender <- as.factor(SDTdf$gender)
+
+# change the format of RecordedDate
+SDTdf$RecordedDate <- as.character(SDTdf$RecordedDate)
+SDTdf$RecordedDate <- substr(SDTdf$RecordedDate, 1, 10)
+
+### ### ### ### ###
+### PSA DATA
+### ### ### ### ### 
+PSAdf <- read_csv("PSA combined data.csv")
+PSAdf$RecordedDate <- strptime(as.character(PSAdf$RecordedDate), "%d/%m/%Y")
+PSAdf$RecordedDate <- format(PSAdf$RecordedDate, "%Y-%m-%d")
+
+# recode condition
+PSAdf$cond[PSAdf$condition == "autonomy_message"] <- 3 #Autonomy support
+PSAdf$cond[PSAdf$condition == "controlling_message"] <- 1 #Controlling
+PSAdf$cond[PSAdf$condition == "no_message"] <- 2 #Neutral
+PSAdf <- dplyr::select(PSAdf, -c("condition"))
+
+#### Combine the data sets ####
+combined1_df <- list(SDTdf, PSAdf)
+combined1_df <- bind_rows(combined1_df, .id = "dataset")
+combined1_df$dataset[combined1_df$dataset == 1] <- "SDT"
+combined1_df$dataset[combined1_df$dataset == 2] <- "PSA"
+combined1_df$labID[is.na(combined1_df$labID)] <- 0 #all PSA data is given value 0 for the labID variable
+combined1_df$exclude[is.na(combined1_df$exclude)] <- 0 #all PSA data is given value 0 for the exclude var
+combined1_df$RecordedDate <- as.Date(combined1_df$RecordedDate, "%Y-%m-%d")
+dplyr::count(group_by(combined1_df, cond))
+
+#### Recode some country codes to match with the covid case datasets ####
+combined1_df$COUNID[combined1_df$COUNID == 'XKS'] <- 'KOS'
+combined1_df$COUNID[combined1_df$COUNID == 'IRAN'] <- 'IRN'
+combined1_df$COUNID[combined1_df$COUNID == 'SLO'] <- 'SVK'
+combined1_df$COUNID[combined1_df$COUNID == 'VIR'] <- 'VGB'
+```
+
+```{r}
+### ### ### ### ### ###
+#### COVID CASE DATA ####
+### ### ### ### ### ###
+
+covid_df <- read_csv("owid-covid-data.csv") 
+covid_df$iso_code[covid_df$iso_code == 'OWID_KOS'] <- 'KOS'
+oldnames = c("iso_code", "date")
+newnames = c("COUNID", "RecordedDate")
+covid_df <- covid_df %>% dplyr::rename_at(vars(oldnames), ~ newnames) %>% 
+  dplyr::select(COUNID, RecordedDate, location, stringency_index, total_cases_per_million)
+covid_df$RecordedDate <- as.Date(covid_df$RecordedDate, "%d/%m/%Y")
+
+## make a data set with cases variable ##
+case_df <- dplyr::select(covid_df, COUNID, RecordedDate, total_cases_per_million)
+
+## make a data set so we can calculate 14-day cumulative rise in stringency to determine steepest rise ##
+stringency_df <- dplyr::select(covid_df, COUNID, RecordedDate, location, stringency_index)
+# create a new stringency variable that is 1-day lagged #
+stringency_df.lag <- stringency_df
+stringency_df.lag$RecordedDate <- stringency_df.lag$RecordedDate - 1
+stringency_df <- merge(stringency_df, stringency_df.lag, 
+                       by = c("COUNID", "location", "RecordedDate"), all.x = TRUE) %>%
+  drop_na(stringency_index.x) %>% 
+  drop_na(stringency_index.y)
+# calculate change in stringency from 1 day to the next
+stringency_df$stringency_change <- stringency_df$stringency_index.y - stringency_df$stringency_index.x
+# calculate 14-day cumulative rise in stringency #
+stringency_df <- stringency_df %>%
+  group_by(COUNID) %>%
+  mutate(stringency_rolling14 = rollapplyr(stringency_change, width = 14, FUN = sum, partial = TRUE))
+# identify steepest rise in stringency across 14 days #
+stringency_df.max <- aggregate(stringency_rolling14 ~ COUNID, data = stringency_df, max)
+oldnames = c("stringency_rolling14")
+newnames = c("stringency_maxrolling14")
+stringency_df.max <- stringency_df.max %>% dplyr::rename_at(vars(oldnames), ~ newnames)
+
+# identify the date when steepest rise in stringency across 14 days happened #
+stringency_df <- merge(stringency_df, stringency_df.max, by = c("COUNID"), all.y = TRUE)
+stringency_df <- dplyr::filter(stringency_df, stringency_maxrolling14 == stringency_rolling14 & 
+                            stringency_change > 0) %>% 
+  dplyr::select(COUNID, RecordedDate, location, stringency_index.x, stringency_index.y, stringency_rolling14)
+oldnames = c("RecordedDate")
+newnames = c("Stringency_RiseDate")
+stringency_df <- stringency_df %>% dplyr::rename_at(vars(oldnames), ~ newnames)
+# in case some countries might have 2 dates of steep rise, so pick the first date #
+stringency_df <- stringency_df %>% 
+  group_by(COUNID) %>% 
+  arrange(Stringency_RiseDate) %>% 
+  slice(1L)
+
+# combine stringency rise date to original data
+combined2_df <- merge(stringency_df, combined1_df, by = c("COUNID"), all.y = TRUE)
+# combine new data with stringency rise date to data with case variable
+combined_df <- merge(case_df, combined2_df, 
+                     by = c("COUNID", "RecordedDate"), all.y = TRUE)
+# calculate number days since steepest rise in stringency when survey was completed #
+combined_df$days_since_rise <- as.double(combined_df$RecordedDate - combined_df$Stringency_RiseDate)
+combined_df$weeks_since_rise <- combined_df$days_since_rise/7
+# observe distribution in days since steepest rise in stringency when survey was completed #
+ggplot(data=combined_df, aes(x=days_since_rise)) +
+  geom_histogram(adjust=1.5, alpha = .7, binwidth = 1)
+describe(combined_df$days_since_rise)
+```
+
+
+
+```{r}
+#### Exclude erroneous data ####
+combined_df$intention_6m[combined_df$exclude == 1] <- NA 
+combined_df$intention_6m[combined_df$labID == 26] <- NA
+
+combined_df$avoid_6m_1[combined_df$exclude == 1] <- NA 
+combined_df$avoid_6m_1[combined_df$labID == 26] <- NA
+
+combined_df$avoid_6m_2[combined_df$exclude == 1] <- NA 
+combined_df$avoid_6m_2[combined_df$labID == 26] <- NA
+
+combined_df$avoid_6m_3[combined_df$exclude == 1] <- NA 
+combined_df$avoid_6m_3[combined_df$labID == 26] <- NA
+
+combined_df$avoid_6m_4[combined_df$exclude == 1] <- NA 
+combined_df$avoid_6m_4[combined_df$labID == 26] <- NA
+
+combined_df$avoid_6m_5[combined_df$exclude == 1] <- NA 
+combined_df$avoid_6m_5[combined_df$labID == 26] <- NA
+
+combined_df$avoid_6m_6[combined_df$exclude == 1] <- NA 
+combined_df$avoid_6m_6[combined_df$labID == 26] <- NA
+
+combined_df$avoid_6m_7[combined_df$exclude == 1] <- NA 
+combined_df$avoid_6m_7[combined_df$labID == 26] <- NA
+```
+
+```{r}
+#### Handling missing values ####
+
+# exclude data that COUNID cannot be matched
+data_no_country <- combined_df %>% dplyr::filter(is.na(COUNID)) # identify data that cannot be matched with country
+dplyr::count(group_by(data_no_country, cond)) # count per condition
+combined_df <- combined_df %>% dplyr::filter(!is.na(COUNID)) # filter out data that cannot be matched with country 
+                                                              # this leaves n = 27,190
+
+# remove those with reported age less than 18
+data_less_than_18 <- dplyr::filter(combined_df, age < 18) # identify data under 18 years old
+dplyr::count(group_by(data_less_than_18, cond)) # count per condition
+combined_df <- dplyr::filter(combined_df, is.na(age) | age > 17) # this leaves n = 27,158
+
+# count number of items completed before and after manipulation
+pre_items <- dplyr::select(combined_df, BL_adhere_1, BL_avoid_1, BL_avoid_2) # 3 items
+post_items <- dplyr::select(combined_df, manip_1, r_manip_2, r_manip_3, motiv_2, motiv_4, motiv_7, motiv_8, motiv_1, motiv_3, motiv_5, motiv_6, defy_1, defy_2, defy_3, defy_4, intention_1w, avoid_1w_1, avoid_1w_2, avoid_1w_3, intention_6m, avoid_6m_1, avoid_6m_2, avoid_6m_3, avoid_6m_4, avoid_6m_5, avoid_6m_6, avoid_6m_7) # 27 items
+
+combined_df$missing_pre <- rowSums(is.na(pre_items)) # count number of pre-manipulation items completed
+dplyr::count(group_by(combined_df, missing_pre))
+combined_df$missing_post <- rowSums(is.na(post_items)) # count number of post-manipulation items completed
+dplyr::count(group_by(combined_df, missing_post))
+
+# observe distribution of missining ness on post-manipulation items
+post_count <- dplyr::filter(dplyr::count(group_by(combined_df, missing_post)), missing_post > 0)
+plot(post_count$missing_post, post_count$n, xlab = "Distribution of missingness on post-manipulation items", 
+     ylab = "Frequency", axes = TRUE)
+lines(post_count$missing_post[order(post_count$missing_post)], 
+      post_count$n[order(post_count$missing_post)], 
+      xlim=range(post_count$missing_post), 
+      ylim=range(post_count$n), pch=16)
+abline(h = 20, col = "red")
+
+# only include participants who have filled out at least 1/4 of the total post-manipulation items (7 items)
+data_no_post_items <- dplyr::filter(combined_df, missing_post > 20) # identify data with 75% missing data for post-manipulation items
+dplyr::count(group_by(data_no_post_items, cond)) # count per condition
+combined_df <- dplyr::filter(combined_df, missing_post < 21) #this leaves n = 25,718
+
+
+dplyr::count(group_by(combined_df, cond)) #count N per condition
+dplyr::count(group_by(combined_df, gender))
+
+countr_ALLn <- dplyr::count(group_by(combined_df, COUNID, location, dataset)) %>%  #make combined list to get sample sizes for each country
+  pivot_wider(id_cols = c(COUNID, location),
+              names_from = dataset, 
+              values_from = n)
+appendix <- merge(stringency_df, countr_ALLn, 
+                  by = c("COUNID", "location"), all.y = TRUE) %>% 
+  dplyr::select(COUNID, location, Stringency_RiseDate, PSA, SDT)
+write_csv(appendix, path = "stringency rise date and sample sizes of each country.csv")
+
+```
+
+
+```{r}
+####group items into their indices####
+
+manip <- dplyr::select(combined_df, manip_1, r_manip_2, r_manip_3)
+# combine BL_adhere_1 with avoid items
+BL_avoid <- dplyr::select(combined_df, BL_adhere_1, BL_avoid_1, BL_avoid_2, BL_avoid_3)
+aut_mot <- dplyr::select(combined_df, motiv_2, motiv_4, motiv_7, motiv_8)
+cont_mot <- dplyr::select(combined_df, motiv_1, motiv_3, motiv_5, motiv_6)
+defy <- dplyr::select(combined_df, defy_1, defy_2, defy_3, defy_4)
+# combine intention_1w with avoid items
+avoid_1w <- dplyr::select(combined_df, intention_1w, avoid_1w_1, avoid_1w_2, avoid_1w_3)
+# combine intention_6m with avoid items
+avoid_6m <- dplyr::select(combined_df, intention_6m, 
+                          avoid_6m_1, avoid_6m_2, avoid_6m_3,
+                          avoid_6m_4, avoid_6m_5, avoid_6m_6, avoid_6m_7)
+
+
+```
+
+
+```{r}
+#### calculate omega for each measure #### 
+psych::omega(BL_avoid)
+psych::omega(manip)
+psych::omega(aut_mot)
+psych::omega(cont_mot)
+psych::omega(defy)
+psych::omega(avoid_1w)
+psych::omega(avoid_6m)
+```
+
+```{r}
+#### calculate chronbach's alpha for each measure ####
+psych::alpha(BL_avoid)
+psych::alpha(manip)
+psych::alpha(aut_mot)
+psych::alpha(cont_mot)
+psych::alpha(defy)
+psych::alpha(avoid_1w)
+psych::alpha(avoid_6m)
+```
+
+```{r}
+#### calculate variable means ####
+#if alpha OR omega < .7, we will make composites from all items 
+#with corrected item-total correlations (r.cor) above .3
+#all scale except for manipulation check has alpha > .7; 
+#for manipulation check, all items yield corrected item-total correlations above .3
+
+# for 3-item manipulation check, alpha yield < .70, 
+# and only 2 items yield > .30 --> this result to new alpha = .82
+# recode r_manip_2 and r_manip_3 so higher score means more perceived control
+combined_df$manip_2 <- 8 - combined_df$r_manip_2
+combined_df$manip_3 <- 8 - combined_df$r_manip_3
+manip <- dplyr::select(combined_df, manip_2, manip_3) 
+
+combined_df$manip <- rowMeans(manip, na.rm = TRUE)
+combined_df$BL_avoid <- rowMeans(BL_avoid, na.rm = TRUE)
+combined_df$aut_mot <- rowMeans(aut_mot, na.rm = TRUE)
+combined_df$cont_mot <- rowMeans(cont_mot, na.rm = TRUE)
+combined_df$defy <- rowMeans(defy, na.rm = TRUE)
+combined_df$avoid_1w <- rowMeans(avoid_1w, na.rm = TRUE)
+combined_df$avoid_6m <- rowMeans(avoid_6m, na.rm = TRUE)
+
+```
+```{r}
+#### demographics ####
+dplyr::count(group_by(combined_df, gender))
+dplyr::count(group_by(combined_df, age))
+describe(combined_df$age)
+
+```
+
+```{r}
+####Open the combined data####
+###Right now this is the data we got from the SDT labs
+###Data cleaning can be done prior to using this codes to add in PSA labs
+
+####count groups varying by study order
+dplyr::count(group_by(combined_df, study_order))
+combined_df$study_order[is.na(combined_df$study_order)] <- "SDT labs"
+
+combined_df$carryover[combined_df$study_order == "001_first"] <- 1
+combined_df$carryover[combined_df$study_order == "003_first"] <- 0
+combined_df$carryover[combined_df$study_order == "003_only"] <- 0
+combined_df$carryover[combined_df$study_order == "SDT labs"] <- 0
+
+####assign IDs
+combined_df$ID=c(1:nrow(combined_df))
+
+#1 = Controlling (dummy)
+#2 = Neutral (cond2 = neutral compared to controlling)
+#3 = Autonomy support (cond 3 = autonomy support compared to controlling)
+combined_df$cond <- as.factor(combined_df$cond)
+dplyr::count(group_by(combined_df, cond)) # N per conditions
+dplyr::count(group_by(combined_df, carryover)) # N per groups that see only 003 or 003 first
+
+write_csv(combined_df, "combined data.csv")
+
+
+```
+
+
+
+```{r}
+####Correlation between variables####
+main.var <- dplyr::select(combined_df, cond, BL_avoid,
+                          manip, aut_mot, cont_mot,
+                          defy, avoid_1w, avoid_6m)
+apa.cor.table(main.var, filename = "correlation table between variables.doc")
+```
+```{r}
+#### condition descriptive statistics ####
+controlling <- data.frame(describe.by(main.var, group = main.var$cond)[[1]]) %>% 
+  dplyr::select(vars, n, mean, sd, min, max)
+no.message <- data.frame(describe.by(main.var, group = main.var$cond)[[2]]) %>%
+  dplyr::select(vars, n, mean, sd, min, max)
+autonomy.support <- data.frame(describe.by(main.var, group = main.var$cond)[[3]]) %>% 
+  dplyr::select(vars, n, mean, sd, min, max)
+
+descriptive <- rbind.data.frame(controlling, no.message, autonomy.support) %>% 
+  rownames_to_column()
+write_csv(descriptive, path = "descriptive statistics.csv")
+```
+
+
+```{r}
+#### ICC ####
+
+summ(lmer(BL_avoid ~ (1|COUNID), data = combined_df))
+summ(lmer(manip ~ (1|COUNID), data = combined_df))
+summ(lmer(aut_mot ~ (1|COUNID), data = combined_df))
+summ(lmer(cont_mot ~ (1|COUNID), data = combined_df))
+summ(lmer(defy ~ (1|COUNID), data = combined_df))
+summ(lmer(avoid_1w ~ (1|COUNID), data = combined_df))
+summ(lmer(avoid_6m ~ (1|COUNID), data = combined_df))
+```
+```{r}
+####ICCs of variables####
+summary(lmer(BL_avoid ~ (1|COUNID), data = combined_df))
+summary(lmer(manip ~ (1|COUNID), data = combined_df))
+summary(lmer(aut_mot ~ (1|COUNID), data = combined_df))
+summary(lmer(cont_mot ~ (1|COUNID), data = combined_df))
+summary(lmer(defy ~ (1|COUNID), data = combined_df))
+summary(lmer(avoid_1w ~ (1|COUNID), data = combined_df))
+summary(lmer(avoid_6m ~ (1|COUNID), data = combined_df))
+```
+
+
+```{r}
+#### test saturation ####
+# here we want to see whether all later months are different from April on all measured variables
+summ(lmer(BL_avoid ~ month + (1|COUNID), data = combined_df))
+summ(lmer(manip ~ month + (1|COUNID), data = combined_df))
+summ(lmer(aut_mot ~ month + (1|COUNID), data = combined_df))
+summ(lmer(cont_mot ~ month + (1|COUNID), data = combined_df))
+summ(lmer(defy ~ month + (1|COUNID), data = combined_df))
+summ(lmer(avoid_1w ~ month + (1|COUNID), data = combined_df))
+summ(lmer(avoid_6m ~ month + (1|COUNID), data = combined_df))
+```
+
+```{r}
+#### First, we check for carry-over effect of PSACR001 on the manipulation check ####
+manip.carry <- lmer(manip ~ cond*carryover + (1|COUNID), data = combined_df,
+                    REML = FALSE)
+summary(manip.carry)
+
+manip.carry_B <- tidy(manip.carry,
+                    conf.int=TRUE,
+                    effects="fixed",
+                    na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+manip.carry_B$VAR <- "Carryover effect"
+
+#hist(residuals(manip.carry))
+manip.carry_R2 <- data.frame(r2beta(manip.carry, 
+                                    partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+manip.carry_R2$VAR <- "Carryover effect"
+
+manip.carry_B <- manip.carry_B[ ,c(9,1:8)]
+manip.carry_R2 <- manip.carry_R2[ , c(1, 10, 2, 7, 9, 8)]
+manip.carry_R2 <- manip.carry_R2[order(manip.carry_R2$Variable),]
+```
+
+
+
+```{r}
+####condition equivalence on avoidance####
+
+#### no exclusion ####
+condequi_BLavo.model <- lmer(BL_avoid ~ 1 + cond + (1|COUNID), data = combined_df,
+                             REML = FALSE)
+summary(condequi_BLavo.model)
+
+condequi_BLavo_B <- tidy(condequi_BLavo.model,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+condequi_BLavo_B$VAR <- "Baseline intention no exclusion"
+
+hist(residuals(condequi_BLavo.model))
+condequi_BLavo_R2 <- data.frame(r2beta(condequi_BLavo.model, 
+                                       partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+condequi_BLavo_R2$VAR <- "Baseline intention no exclusion"
+
+condequi_BLavo_B <- condequi_BLavo_B[ ,c(9,1:8)]
+condequi_BLavo_R2 <- condequi_BLavo_R2[ , c(1, 10, 2, 7, 9, 8)]
+condequi_BLavo_R2 <- condequi_BLavo_R2[order(condequi_BLavo_R2$Variable),]
+```
+
+```{r}
+#### Manipulation check ####
+
+#### no exclusion ####
+manip.model <- lmer(manip ~ cond + (1|COUNID), data = combined_df,
+                    REML = FALSE)
+summary(manip.model)
+
+manip.model_B <- tidy(manip.model,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+manip.model_B$VAR <- "Manipulation no exclusion"
+
+#hist(residuals(condequi_BLavo.model))
+manip_R2 <- data.frame(r2beta(manip.model, 
+                              partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+manip_R2$VAR <- "Manipulation no exclusion"
+
+manip.model_B <- manip.model_B[ ,c(9,1:8)]
+manip_R2 <- manip_R2[ , c(1, 10, 2, 7, 9, 8)]
+manip_R2 <- manip_R2[order(manip_R2$Variable),]
+
+#### no exclusion - with covariates ####
+manip.model.cov <- lmer(manip ~ cond + 
+                          BL_avoid + total_cases_per_million + (1|COUNID), data = combined_df,
+                        REML = FALSE)
+summary(manip.model.cov)
+
+manip.model.cov_B <- tidy(manip.model.cov,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+manip.model.cov_B$VAR <- "Manipulation no exclusion with covariates"
+
+#hist(residuals(condequi_BLavo.model.cov))
+manip.cov_R2 <- data.frame(r2beta(manip.model.cov, 
+                              partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+manip.cov_R2$VAR <- "Manipulation no exclusion with covariates"
+
+manip.model.cov_B <- manip.model.cov_B[ ,c(9,1:8)]
+manip.cov_R2 <- manip.cov_R2[ , c(1, 10, 2, 7, 9, 8)]
+manip.cov_R2 <- manip.cov_R2[order(manip.cov_R2$Variable),]
+```
+
+
+```{r}
+####Autonomous motivation####
+#### no exclusion ####
+aut_mot <- lmer(aut_mot ~ cond + (1|COUNID), data = combined_df,
+                REML = FALSE) #little variance around the slope
+summary(aut_mot)
+
+aut_mot_B <- tidy(aut_mot,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+aut_mot_B$VAR <- "Autonomous motivation no exclusion"
+
+#hist(residuals(aut_mot))
+aut_mot_R2 <- data.frame(r2beta(aut_mot,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+aut_mot_R2$VAR <- "Autonomous motivation no exclusion"
+
+aut_mot_B <- aut_mot_B[ ,c(9,1:8)]
+aut_mot_R2 <- aut_mot_R2[ , c(1, 10, 2, 7, 9, 8)]
+aut_mot_R2 <- aut_mot_R2[order(aut_mot_R2$Variable),]
+
+#### no exclusion - with covariates ####
+aut_mot.model.cov <- lmer(aut_mot ~ cond + 
+                          BL_avoid + total_cases_per_million + (1|COUNID), data = combined_df,
+                        REML = FALSE)
+summary(aut_mot.model.cov)
+
+aut_mot.model.cov_B <- tidy(aut_mot.model.cov,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+aut_mot.model.cov_B$VAR <- "autonomous motivation no exclusion with covariates"
+
+#hist(residuals(condequi_BLavo.model.cov))
+aut_mot.cov_R2 <- data.frame(r2beta(aut_mot.model.cov, 
+                              partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+aut_mot.cov_R2$VAR <- "autonomous motivation no exclusion with covariates"
+
+aut_mot.model.cov_B <- aut_mot.model.cov_B[ ,c(9,1:8)]
+aut_mot.cov_R2 <- aut_mot.cov_R2[ , c(1, 10, 2, 7, 9, 8)]
+aut_mot.cov_R2 <- aut_mot.cov_R2[order(aut_mot.cov_R2$Variable),]
+```
+
+```{r}
+####Controlled motivation####
+#### no exclusion ####
+cont_mot <- lmer(cont_mot ~ cond + (1|COUNID), data = combined_df,
+                 REML = FALSE)
+summary(cont_mot)
+
+cont_mot_B <- tidy(cont_mot,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+cont_mot_B$VAR <- "Controlled motivation no exclusion"
+
+hist(residuals(cont_mot))
+cont_mot_R2 <- data.frame(r2beta(cont_mot,
+                                 partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+cont_mot_R2$VAR <- "Controlled motivation no exclusion"
+
+cont_mot_B <- cont_mot_B[ ,c(9,1:8)]
+cont_mot_R2 <- cont_mot_R2[ , c(1, 10, 2, 7, 9, 8)]
+cont_mot_R2 <- cont_mot_R2[order(cont_mot_R2$Variable),]
+
+#### no exclusion - with covariates ####
+cont_mot.model.cov <- lmer(cont_mot ~ cond + 
+                          BL_avoid + total_cases_per_million + (1|COUNID), data = combined_df,
+                        REML = FALSE)
+summary(cont_mot.model.cov)
+
+cont_mot.model.cov_B <- tidy(cont_mot.model.cov,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+cont_mot.model.cov_B$VAR <- "controlled motivation no exclusion with covariates"
+
+#hist(residuals(condequi_BLavo.model.cov))
+cont_mot.cov_R2 <- data.frame(r2beta(cont_mot.model.cov, 
+                              partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+cont_mot.cov_R2$VAR <- "controlled motivation no exclusion with covariates"
+
+cont_mot.model.cov_B <- cont_mot.model.cov_B[ ,c(9,1:8)]
+cont_mot.cov_R2 <- cont_mot.cov_R2[ , c(1, 10, 2, 7, 9, 8)]
+cont_mot.cov_R2 <- cont_mot.cov_R2[order(cont_mot.cov_R2$Variable),]
+
+```
+
+```{r}
+####Defiance####
+#### Hypothesis 1 ####
+#### no exclusion ####
+defy.h1 <- lmer(defy ~ cond + (1|COUNID), data = combined_df,
+                REML = FALSE)
+summary(defy.h1)
+
+defy.h1_B <- tidy(defy.h1,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+defy.h1_B$VAR <- "Defiance Hypothesis 1 no exclusion"
+
+hist(residuals(defy.h1))
+defy.h1_R2 <- data.frame(r2beta(defy.h1,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+defy.h1_R2$VAR <- "Defiance Hypothesis 1 no exclusion"
+
+defy.h1_B <- defy.h1_B[ ,c(9,1:8)]
+defy.h1_R2 <- defy.h1_R2[ , c(1, 10, 2, 7, 9, 8)]
+defy.h1_R2 <- defy.h1_R2[order(defy.h1_R2$Variable),]
+
+#### Hypothesis 1 ####
+#### no exclusion - with covariates ####
+defy.cov.h1 <- lmer(defy ~ cond + 
+                          BL_avoid + total_cases_per_million + (1|COUNID), data = combined_df,
+                        REML = FALSE)
+summary(defy.cov.h1)
+
+defy.cov.h1_B <- tidy(defy.cov.h1,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+defy.cov.h1_B$VAR <- "Defiance Hypothesis 1 no exclusion with covariates"
+
+#hist(residuals(condequi_BLavo.model.cov))
+defy.cov.h1_R2 <- data.frame(r2beta(defy.cov.h1, 
+                              partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+defy.cov.h1_R2$VAR <- "Defiance Hypothesis 1 no exclusion with covariates"
+
+defy.cov.h1_B <- defy.cov.h1_B[ ,c(9,1:8)]
+defy.cov.h1_R2 <- defy.cov.h1_R2[ , c(1, 10, 2, 7, 9, 8)]
+defy.cov.h1_R2 <- defy.cov.h1_R2[order(defy.cov.h1_R2$Variable),]
+
+#### Hypothesis 2 ####
+#### no exclusion ####
+h2.df <- dplyr::select(combined_df, defy, avoid_1w, avoid_6m, aut_mot, cont_mot, 
+                       total_cases_per_million, BL_avoid, COUNID)
+h2.df[1:7] <- lapply(h2.df[1:7], as.numeric)
+
+defy.h2 <- lmer(defy ~ 1 + aut_mot + cont_mot + (1|COUNID), data = h2.df,
+                REML = FALSE)
+summary(defy.h2)
+
+defy.h2_B <- tidy(defy.h2,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+defy.h2_B$VAR <- "Defiance Hypothesis 2 no exclusion"
+
+hist(residuals(defy.h2))
+defy.h2_R2 <- data.frame(r2beta(defy.h2,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+defy.h2_R2$VAR <- "Defiance Hypothesis 2 no exclusion"
+
+defy.h2_B <- defy.h2_B[ ,c(9,1:8)]
+defy.h2_R2 <- defy.h2_R2[ , c(1, 10, 2, 7, 9, 8)]
+defy.h2_R2 <- defy.h2_R2[order(defy.h2_R2$Variable),]
+
+#### Hypothesis 2 ####
+#### no exclusion - with covariates ####
+defy.cov.h2 <- lmer(defy ~ 1 + aut_mot + cont_mot + 
+                  BL_avoid + total_cases_per_million + (1|COUNID), data = h2.df,
+                REML = FALSE)
+summary(defy.cov.h2)
+
+defy.cov.h2_B <- tidy(defy.cov.h2,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+defy.cov.h2_B$VAR <- "Defiance Hypothesis 2 no exclusion with covariates"
+
+hist(residuals(defy.cov.h2))
+defy.cov.h2_R2 <- data.frame(r2beta(defy.cov.h2,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+defy.cov.h2_R2$VAR <- "Defiance Hypothesis 2 no exclusion with covariates"
+
+defy.cov.h2_B <- defy.cov.h2_B[ ,c(9,1:8)]
+defy.cov.h2_R2 <- defy.cov.h2_R2[ , c(1, 10, 2, 7, 9, 8)]
+defy.cov.h2_R2 <- defy.cov.h2_R2[order(defy.cov.h2_R2$Variable),]
+
+```
+
+```{r}
+####intention for social distancing in 1 week####
+
+#### Hypothesis 1 ####
+#### no exclusion ####
+avoid_1w.h1 <- lmer(avoid_1w ~ cond + (1|COUNID), data = combined_df,
+                    REML = FALSE)
+summary(avoid_1w.h1)
+
+avoid_1w.h1_B <- tidy(avoid_1w.h1,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_1w.h1_B$VAR <- "Intention to avoid 1w Hypothesis 1 no exclusion"
+
+hist(residuals(avoid_1w.h1))
+avoid_1w.h1_R2 <- data.frame(r2beta(avoid_1w.h1,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_1w.h1_R2$VAR <- "Intention to avoid 1w Hypothesis 1 no exclusion"
+
+avoid_1w.h1_B <- avoid_1w.h1_B[ ,c(9,1:8)]
+avoid_1w.h1_R2 <- avoid_1w.h1_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_1w.h1_R2 <- avoid_1w.h1_R2[order(avoid_1w.h1_R2$Variable),]
+
+#### Hypothesis 1 ####
+#### no exclusion - with covariates ####
+avoid_1w.cov.h1 <- lmer(avoid_1w ~ cond + 
+                          BL_avoid + total_cases_per_million + (1|COUNID), data = combined_df,
+                    REML = FALSE)
+summary(avoid_1w.cov.h1)
+
+avoid_1w.cov.h1_B <- tidy(avoid_1w.cov.h1,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_1w.cov.h1_B$VAR <- "Intention to avoid 1w Hypothesis 1 no exclusion with covariates"
+
+hist(residuals(avoid_1w.cov.h1))
+avoid_1w.cov.h1_R2 <- data.frame(r2beta(avoid_1w.cov.h1,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_1w.cov.h1_R2$VAR <- "Intention to avoid 1w Hypothesis 1 no exclusion with covariates"
+
+avoid_1w.cov.h1_B <- avoid_1w.cov.h1_B[ ,c(9,1:8)]
+avoid_1w.cov.h1_R2 <- avoid_1w.cov.h1_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_1w.cov.h1_R2 <- avoid_1w.cov.h1_R2[order(avoid_1w.cov.h1_R2$Variable),]
+
+#### Hypothesis 2 ####
+#### no exclusion ####
+avoid_1w.h2 <- lmer(avoid_1w ~ 1 + aut_mot + cont_mot + (1|COUNID), data = h2.df,
+                    REML = FALSE)
+summary(avoid_1w.h2)
+
+avoid_1w.h2_B <- tidy(avoid_1w.h2,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_1w.h2_B$VAR <- "Intention to avoid 1w Hypothesis 2 no exclusion"
+
+hist(residuals(avoid_1w.h2))
+avoid_1w.h2_R2 <- data.frame(r2beta(avoid_1w.h2,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_1w.h2_R2$VAR <- "Intention to avoid 1w Hypothesis 2 no exclusion"
+
+avoid_1w.h2_B <- avoid_1w.h2_B[ ,c(9,1:8)]
+avoid_1w.h2_R2 <- avoid_1w.h2_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_1w.h2_R2 <- avoid_1w.h2_R2[order(avoid_1w.h2_R2$Variable),]
+
+#### Hypothesis 2 ####
+#### no exclusion - covariates ####
+avoid_1w.cov.h2 <- lmer(avoid_1w ~ 1 + aut_mot + cont_mot + 
+                          BL_avoid + total_cases_per_million + (1|COUNID), data = h2.df,
+                    REML = FALSE)
+summary(avoid_1w.cov.h2)
+
+avoid_1w.cov.h2_B <- tidy(avoid_1w.cov.h2,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_1w.cov.h2_B$VAR <- "Intention to avoid 1w Hypothesis 2 no exclusion with covariates"
+
+hist(residuals(avoid_1w.cov.h2))
+avoid_1w.cov.h2_R2 <- data.frame(r2beta(avoid_1w.cov.h2,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_1w.cov.h2_R2$VAR <- "Intention to avoid 1w Hypothesis 2 no exclusion with covariates"
+
+avoid_1w.cov.h2_B <- avoid_1w.cov.h2_B[ ,c(9,1:8)]
+avoid_1w.cov.h2_R2 <- avoid_1w.cov.h2_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_1w.cov.h2_R2 <- avoid_1w.cov.h2_R2[order(avoid_1w.cov.h2_R2$Variable),]
+
+```
+
+```{r}
+####Intention to social distance in 6 months####
+
+#### Hypothesis 1 ####
+#### no exclusion ####
+avoid_6m.h1 <- lmer(avoid_6m ~ cond + (1|COUNID), data = combined_df,
+                    REML = FALSE)
+summary(avoid_6m.h1)
+
+avoid_6m.h1_B <- tidy(avoid_6m.h1,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_6m.h1_B$VAR <- "Intention to avoid 6m Hypothesis 1 no exclusion"
+
+hist(residuals(avoid_6m.h1))
+avoid_6m.h1_R2 <- data.frame(r2beta(avoid_6m.h1,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_6m.h1_R2$VAR <- "Intention to avoid 6m Hypothesis 1 no exclusion"
+
+avoid_6m.h1_B <- avoid_6m.h1_B[ ,c(9,1:8)]
+avoid_6m.h1_R2 <- avoid_6m.h1_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_6m.h1_R2 <- avoid_6m.h1_R2[order(avoid_6m.h1_R2$Variable),]
+
+#### Hypothesis 1 ####
+#### no exclusion - no covariates ####
+avoid_6m.cov.h1 <- lmer(avoid_6m ~ cond +  
+                          BL_avoid + total_cases_per_million + (1|COUNID), data = combined_df,
+                    REML = FALSE)
+summary(avoid_6m.cov.h1)
+
+avoid_6m.cov.h1_B <- tidy(avoid_6m.cov.h1,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_6m.cov.h1_B$VAR <- "Intention to avoid 6m Hypothesis 1 no exclusion"
+
+hist(residuals(avoid_6m.cov.h1))
+avoid_6m.cov.h1_R2 <- data.frame(r2beta(avoid_6m.cov.h1,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_6m.cov.h1_R2$VAR <- "Intention to avoid 6m Hypothesis 1 no exclusion with covariates"
+
+avoid_6m.cov.h1_B <- avoid_6m.cov.h1_B[ ,c(9,1:8)]
+avoid_6m.cov.h1_R2 <- avoid_6m.cov.h1_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_6m.cov.h1_R2 <- avoid_6m.cov.h1_R2[order(avoid_6m.cov.h1_R2$Variable),]
+
+#### Hypothesis 2 ####
+#### no exclusion ####
+avoid_6m.h2 <- lmer(avoid_6m ~ 1 + aut_mot + cont_mot + (1|COUNID), data = h2.df,
+                    REML = FALSE)
+summary(avoid_6m.h2)
+
+avoid_6m.h2_B <- tidy(avoid_6m.h2,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_6m.h2_B$VAR <- "Intention to avoid 6m Hypothesis 2 no exclusion"
+
+hist(residuals(avoid_6m.h2))
+avoid_6m.h2_R2 <- data.frame(r2beta(avoid_6m.h2,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_6m.h2_R2$VAR <- "Intention to avoid 6m Hypothesis 2 no exclusion"
+
+avoid_6m.h2_B <- avoid_6m.h2_B[ ,c(9,1:8)]
+avoid_6m.h2_R2 <- avoid_6m.h2_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_6m.h2_R2 <- avoid_6m.h2_R2[order(avoid_6m.h2_R2$Variable),]
+
+#### Hypothesis 2 ####
+#### no exclusion - no covariates ####
+avoid_6m.cov.h2 <- lmer(avoid_6m ~ 1 + aut_mot + cont_mot +   
+                          BL_avoid + total_cases_per_million + (1|COUNID), data = h2.df,
+                    REML = FALSE)
+summary(avoid_6m.cov.h2)
+
+avoid_6m.cov.h2_B <- tidy(avoid_6m.cov.h2,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_6m.cov.h2_B$VAR <- "Intention to avoid 6m Hypothesis 2 no exclusion with covariates"
+
+hist(residuals(avoid_6m.cov.h2))
+avoid_6m.cov.h2_R2 <- data.frame(r2beta(avoid_6m.cov.h2,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_6m.cov.h2_R2$VAR <- "Intention to avoid 6m Hypothesis 2 no exclusion with covariates"
+
+avoid_6m.cov.h2_B <- avoid_6m.cov.h2_B[ ,c(9,1:8)]
+avoid_6m.cov.h2_R2 <- avoid_6m.cov.h2_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_6m.cov.h2_R2 <- avoid_6m.cov.h2_R2[order(avoid_6m.cov.h2_R2$Variable),]
+```
+
+```{r}
+#### TABLE 2 ####
+#### combine all R2 tables - no exclusion ####
+
+# no exclusion
+R2_tbl <- rbind(condequi_BLavo_R2, manip.carry_R2, manip_R2, 
+                aut_mot_R2, cont_mot_R2, 
+                defy.h1_R2, defy.h2_R2, 
+                avoid_1w.h1_R2, avoid_1w.h2_R2, 
+                avoid_6m.h1_R2, avoid_6m.h2_R2)
+
+#### combine all unstandardized B tables - no exclusion ####
+
+# no exclusion
+B_tbl <- rbind(condequi_BLavo_B, manip.carry_B, manip.model_B, 
+                aut_mot_B, cont_mot_B, 
+                defy.h1_B, defy.h2_B, 
+                avoid_1w.h1_B, avoid_1w.h2_B, 
+                avoid_6m.h1_B, avoid_6m.h2_B)
+
+write_csv(R2_tbl, path = "partial R squared table no exclusion.csv")
+write_csv(B_tbl, path = "unstandardized B table no exclusion.csv")
+```
+
+```{r}
+#### countries with sample sizes less than 210 ####
+countr_n <- dplyr::count(group_by(combined_df, COUNID))
+N210_df <- merge(countr_n, combined_df, by = "COUNID", all.y = TRUE)
+
+N210_df <- dplyr::filter(N210_df, n > 209)
+dplyr::count(group_by(N210_df, COUNID))
+dplyr::count(group_by(N210_df, cond))
+N210_df$cond <- as.factor(N210_df$cond)
+```
+```{r}
+#### countries with sample sizes < 210: carry-over effect of PSACR001 on the manipulation check ####
+manip.carry.210 <- lmer(manip ~ cond*carryover + (cond*carryover|COUNID), 
+                        data = N210_df,
+                        REML = FALSE)
+summary(manip.carry.210)
+
+manip.carry.210_B <- tidy(manip.carry.210,
+                    conf.int=TRUE,
+                    effects="fixed",
+                    na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+manip.carry.210_B$VAR <- "Carryover effect"
+
+#hist(residuals(manip.carry))
+manip.carry.210_R2 <- data.frame(r2beta(manip.carry.210, 
+                                    partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+manip.carry.210_R2$VAR <- "Carryover effect"
+
+manip.carry.210_B <- manip.carry.210_B[ ,c(9,1:8)]
+manip.carry.210_R2 <- manip.carry.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+manip.carry.210_R2 <- manip.carry.210_R2[order(manip.carry.210_R2$Variable),]
+```
+
+```{r}
+#### countries with sample sizes < 210: condition equivalence on avoidance####
+
+condequi_BLavo.210 <- lmer(BL_avoid ~ cond + (cond|COUNID), data = N210_df,
+                           REML = FALSE)
+summary(condequi_BLavo.210)
+
+condequi_BLavo.210_B <- tidy(condequi_BLavo.210,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+condequi_BLavo.210_B$VAR <- "Baseline intention "
+
+hist(residuals(condequi_BLavo.210))
+condequi_BLavo.210_R2 <- data.frame(r2beta(condequi_BLavo.210, 
+                                       partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+condequi_BLavo.210_R2$VAR <- "Baseline intention "
+
+condequi_BLavo.210_B <- condequi_BLavo.210_B[ ,c(9,1:8)]
+condequi_BLavo.210_R2 <- condequi_BLavo.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+condequi_BLavo.210_R2 <- condequi_BLavo.210_R2[order(condequi_BLavo.210_R2$Variable),]
+```
+
+```{r}
+#### countries with sample sizes < 210: Manipulation check ####
+### going forward not controlling for initial adherence because no condition effect with new data set, NOT excluding 001
+manip.210 <- lmer(manip ~ cond + (cond|COUNID), data = N210_df,
+                  REML = FALSE)
+summary(manip.210)
+
+manip.210_B <- tidy(manip.210,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+manip.210_B$VAR <- "Manipulation "
+
+#hist(residuals(condequi_BLavo.210))
+manip.210_R2 <- data.frame(r2beta(manip.210, 
+                              partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+manip.210_R2$VAR <- "Manipulation "
+
+manip.210_B <- manip.210_B[ ,c(9,1:8)]
+manip.210_R2 <- manip.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+manip.210_R2 <- manip.210_R2[order(manip.210_R2$Variable),]
+```
+
+
+```{r}
+#### countries with sample sizes < 210: Autonomous motivation####
+aut_mot.210 <- lmer(aut_mot ~ cond + (cond|COUNID), data = N210_df,
+                    REML = FALSE) 
+summary(aut_mot.210)
+
+aut_mot.210_B <- tidy(aut_mot.210,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+aut_mot.210_B$VAR <- "Autonomous motivation "
+
+hist(residuals(aut_mot.210))
+aut_mot.210_R2 <- data.frame(r2beta(aut_mot.210,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+aut_mot.210_R2$VAR <- "Autonomous motivation "
+
+aut_mot.210_B <- aut_mot.210_B[ ,c(9,1:8)]
+aut_mot.210_R2 <- aut_mot.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+aut_mot.210_R2 <- aut_mot.210_R2[order(aut_mot.210_R2$Variable),]
+```
+
+```{r}
+#### countries with sample sizes < 210: Controlled motivation####
+
+cont_mot.210 <- lmer(cont_mot ~ cond + (cond|COUNID), data = N210_df,
+                     REML = FALSE)
+summary(cont_mot.210)
+
+cont_mot.210_B <- tidy(cont_mot.210,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+cont_mot.210_B$VAR <- "Controlled motivation "
+
+hist(residuals(cont_mot.210))
+cont_mot.210_R2 <- data.frame(r2beta(cont_mot.210,
+                                 partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+cont_mot.210_R2$VAR <- "Controlled motivation "
+
+cont_mot.210_B <- cont_mot.210_B[ ,c(9,1:8)]
+cont_mot.210_R2 <- cont_mot.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+cont_mot.210_R2 <- cont_mot.210_R2[order(cont_mot.210_R2$Variable),]
+
+```
+
+```{r}
+#### countries with sample sizes < 210: Defiance####
+#### Hypothesis 1 ####
+
+defy.h1.210 <- lmer(defy ~ cond + (cond|COUNID), data = N210_df,
+                    REML = FALSE)
+summary(defy.h1.210)
+
+defy.h1.210_B <- tidy(defy.h1.210,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+defy.h1.210_B$VAR <- "Defiance Hypothesis 1 "
+
+hist(residuals(defy.h1.210))
+defy.h1.210_R2 <- data.frame(r2beta(defy.h1.210,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+defy.h1.210_R2$VAR <- "Defiance Hypothesis 1 "
+
+defy.h1.210_B <- defy.h1.210_B[ ,c(9,1:8)]
+defy.h1.210_R2 <- defy.h1.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+defy.h1.210_R2 <- defy.h1.210_R2[order(defy.h1.210_R2$Variable),]
+
+#### Hypothesis 2 ####
+defy.h2.210 <- lmer(defy ~ aut_mot + cont_mot + (aut_mot + cont_mot|COUNID), data = N210_df,
+                REML = FALSE)
+summary(defy.h2.210)
+
+defy.h2.210_B <- tidy(defy.h2.210,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+defy.h2.210_B$VAR <- "Defiance Hypothesis 2 "
+
+hist(residuals(defy.h2.210))
+defy.h2.210_R2 <- data.frame(r2beta(defy.h2.210,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+defy.h2.210_R2$VAR <- "Defiance Hypothesis 2 "
+
+defy.h2.210_B <- defy.h2.210_B[ ,c(9,1:8)]
+defy.h2.210_R2 <- defy.h2.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+defy.h2.210_R2 <- defy.h2.210_R2[order(defy.h2.210_R2$Variable),]
+
+```
+
+```{r}
+#### countries with sample sizes < 210: intention for social distancing in 1 week####
+#### Hypothesis 1 ####
+
+avoid_1w.h1.210 <- lmer(avoid_1w ~ cond + (cond|COUNID), data = N210_df,
+                        REML = FALSE)
+summary(avoid_1w.h1.210)
+
+avoid_1w.h1.210_B <- tidy(avoid_1w.h1.210,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_1w.h1.210_B$VAR <- "Intention to avoid 1w Hypothesis 1 "
+
+hist(residuals(avoid_1w.h1.210))
+avoid_1w.h1.210_R2 <- data.frame(r2beta(avoid_1w.h1.210,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_1w.h1.210_R2$VAR <- "Intention to avoid 1w Hypothesis 1 "
+
+avoid_1w.h1.210_B <- avoid_1w.h1.210_B[ ,c(9,1:8)]
+avoid_1w.h1.210_R2 <- avoid_1w.h1.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_1w.h1.210_R2 <- avoid_1w.h1.210_R2[order(avoid_1w.h1.210_R2$Variable),]
+
+#### Hypothesis 2 ####
+avoid_1w.h2.210 <- lmer(avoid_1w ~ aut_mot + cont_mot + (aut_mot + cont_mot|COUNID), 
+                        data = N210_df,
+                        REML = FALSE)
+summary(avoid_1w.h2.210)
+
+avoid_1w.h2.210_B <- tidy(avoid_1w.h2.210,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_1w.h2.210_B$VAR <- "Intention to avoid 1w Hypothesis 2 "
+
+hist(residuals(avoid_1w.h2.210))
+avoid_1w.h2.210_R2 <- data.frame(r2beta(avoid_1w.h2.210,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_1w.h2.210_R2$VAR <- "Intention to avoid 1w Hypothesis 2 "
+
+avoid_1w.h2.210_B <- avoid_1w.h2.210_B[ ,c(9,1:8)]
+avoid_1w.h2.210_R2 <- avoid_1w.h2.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_1w.h2.210_R2 <- avoid_1w.h2.210_R2[order(avoid_1w.h2.210_R2$Variable),]
+
+```
+
+```{r}
+#### countries with sample sizes < 210: Intention to social distance in 6 months####
+#### Hypothesis 1 ####
+
+avoid_6m.h1.210 <- lmer(avoid_6m ~ cond + (cond|COUNID), data = N210_df,
+                        REML = FALSE)
+summary(avoid_6m.h1.210)
+
+avoid_6m.h1.210_B <- tidy(avoid_6m.h1.210,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_6m.h1.210_B$VAR <- "Intention to avoid 6m Hypothesis 1 "
+
+hist(residuals(avoid_6m.h1.210))
+avoid_6m.h1.210_R2 <- data.frame(r2beta(avoid_6m.h1.210,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_6m.h1.210_R2$VAR <- "Intention to avoid 6m Hypothesis 1 "
+
+avoid_6m.h1.210_B <- avoid_6m.h1.210_B[ ,c(9,1:8)]
+avoid_6m.h1.210_R2 <- avoid_6m.h1.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_6m.h1.210_R2 <- avoid_6m.h1.210_R2[order(avoid_6m.h1.210_R2$Variable),]
+
+#### Hypothesis 2 ####
+
+avoid_6m.h2.210 <- lmer(avoid_6m ~ aut_mot + cont_mot + (aut_mot + cont_mot|COUNID), 
+                        data = N210_df,
+                        REML = FALSE)
+summary(avoid_6m.h2.210)
+
+avoid_6m.h2.210_B <- tidy(avoid_6m.h2.210,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_6m.h2.210_B$VAR <- "Intention to avoid 6m Hypothesis 2 "
+
+hist(residuals(avoid_6m.h2.210))
+avoid_6m.h2.210_R2 <- data.frame(r2beta(avoid_6m.h2.210,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_6m.h2.210_R2$VAR <- "Intention to avoid 6m Hypothesis 2 "
+
+avoid_6m.h2.210_B <- avoid_6m.h2.210_B[ ,c(9,1:8)]
+avoid_6m.h2.210_R2 <- avoid_6m.h2.210_R2[ , c(1, 10, 2, 7, 9, 8)]
+avoid_6m.h2.210_R2 <- avoid_6m.h2.210_R2[order(avoid_6m.h2.210_R2$Variable),]
+```
+
+```{r}
+#### TABLE 3 ####
+####  countries with sample sizes < 210: combine all R2 tables ####
+R2.210_tbl <- rbind(condequi_BLavo.210_R2, manip.carry.210_R2, manip.210_R2, 
+                aut_mot.210_R2, cont_mot.210_R2, 
+                defy.h1.210_R2, defy.h2.210_R2, 
+                avoid_1w.h1.210_R2, avoid_1w.h2.210_R2, 
+                avoid_6m.h1.210_R2, avoid_6m.h2.210_R2)
+
+#### combine all unstandardized B tables ####
+B.210_tbl <- rbind(condequi_BLavo.210_B, manip.carry.210_B, manip.210_B, 
+                aut_mot.210_B, cont_mot.210_B, 
+                defy.h1.210_B, defy.h2.210_B, 
+                avoid_1w.h1.210_B, avoid_1w.h2.210_B, 
+                avoid_6m.h1.210_B, avoid_6m.h2.210_B)
+
+write_csv(R2.210_tbl, path = "partial R squared table sensitivity.csv")
+write_csv(B.210_tbl, path = "unstandardized B table sensitivity.csv")
+```
+
+
+
+```{r}
+#### participants in first 30 days after stringency rise ####
+df_cases <- dplyr::filter(combined_df, days_since_rise > 0 &  days_since_rise < 31)
+
+dplyr::count(group_by(df_cases, COUNID))
+dplyr::count(group_by(df_cases, cond)) # for footnotes of table 4
+
+### Baseline intention ###
+c_BLavoid <- lmer(BL_avoid ~ cond + total_cases_per_million + (1|COUNID), 
+                  data = df_cases,
+                  REML = FALSE)
+summary(c_BLavoid)
+
+c_BLavoid_B <- tidy(c_BLavoid,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+c_BLavoid_B$VAR <- "Baseline intention"
+
+c_BLavoid_R2 <- data.frame(r2beta(c_BLavoid,
+                                  partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+c_BLavoid_R2$VAR <- "Baseline intention"
+
+c_BLavoid_B <- c_BLavoid_B[ ,c(9,1:8)]
+c_BLavoid_R2 <- c_BLavoid_R2[ , c(1, 10, 2, 7, 9, 8)]
+c_BLavoid_R2 <- c_BLavoid_R2[order(c_BLavoid_R2$Variable),]
+```
+
+
+```{r}
+#### participants in first 30 days after stringency rise:  Manipulation check ####
+c_manip <- lmer(manip ~ cond + total_cases_per_million + (1|COUNID), 
+                data = df_cases,
+                REML = FALSE)
+summary(c_manip)
+
+c_manip_B <- tidy(c_manip,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+c_manip_B$VAR <- "Manipulation check"
+
+c_manip_R2 <- data.frame(r2beta(c_manip, partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+c_manip_R2$VAR <- "Manipulation check"
+
+c_manip_B <- c_manip_B[ ,c(9,1:8)]
+c_manip_R2 <- c_manip_R2[ , c(1, 10, 2, 7, 9, 8)]
+c_manip_R2 <- c_manip_R2[order(c_manip_R2$Variable),]
+```
+
+
+```{r}
+#### participants in first 30 days after stringency rise:  Autonomous motivation ####
+c_autmot <- lmer(aut_mot ~ cond + total_cases_per_million + (1|COUNID), 
+                 data = df_cases,
+                 REML = FALSE)
+summary(c_autmot)
+
+c_autmot_B <- tidy(c_autmot,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+c_autmot_B$VAR <- "Autonomous motivation"
+
+c_autmot_R2 <- data.frame(r2beta(c_autmot, 
+                                       partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+c_autmot_R2$VAR <- "Autonomous motivation"
+
+c_autmot_B <- c_autmot_B[ ,c(9,1:8)]
+c_autmot_R2 <- c_autmot_R2[ , c(1, 10, 2, 7, 9, 8)]
+c_autmot_R2 <- c_autmot_R2[order(c_autmot_R2$Variable),]
+```
+
+
+```{r}
+#### participants in first 30 days after stringency rise:  Controlled motivation ####
+c_conmot <- lmer(cont_mot ~ cond + total_cases_per_million + (1|COUNID), 
+                 data = df_cases,
+                 REML = FALSE)
+summary(c_conmot)
+
+c_conmot_B <- tidy(c_conmot,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+c_conmot_B$VAR <- "Controlled motivation"
+
+c_conmot_R2 <- data.frame(r2beta(c_conmot, 
+                                       partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+c_conmot_R2$VAR <- "Controlled motivation"
+
+c_conmot_B <- c_conmot_B[ ,c(9,1:8)]
+c_conmot_R2 <- c_conmot_R2[ , c(1, 10, 2, 7, 9, 8)]
+c_conmot_R2 <- c_conmot_R2[order(c_conmot_R2$Variable),]
+```
+
+
+```{r}
+#### participants in first 30 days after stringency rise: Defiance ####
+c_defy <- lmer(defy ~ cond + total_cases_per_million + (1|COUNID), 
+               data = df_cases,
+               REML = FALSE)
+summary(c_defy)
+
+c_defy_B <- tidy(c_defy,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+c_defy_B$VAR <- "Defiance"
+
+c_defy_R2 <- data.frame(r2beta(c_defy, 
+                                       partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+c_defy_R2$VAR <- "Defiance"
+
+c_defy_B <- c_defy_B[ ,c(9,1:8)]
+c_defy_R2 <- c_defy_R2[ , c(1, 10, 2, 7, 9, 8)]
+c_defy_R2 <- c_defy_R2[order(c_defy_R2$Variable),]
+```
+
+
+```{r}
+#### participants in first 30 days after stringency rise: Intention in 1 week ####
+c_avoid1w <- lmer(avoid_1w ~ cond + total_cases_per_million + (1|COUNID), 
+                  data = df_cases,
+                  REML = FALSE)
+summary(c_avoid1w)
+
+c_avoid1w_B <- tidy(c_avoid1w,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+c_avoid1w_B$VAR <- "Intention in 1 week"
+
+c_avoid1w_R2 <- data.frame(r2beta(c_avoid1w, 
+                                       partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+c_avoid1w_R2$VAR <- "Intention in 1 week"
+
+c_avoid1w_B <- c_avoid1w_B[ ,c(9,1:8)]
+c_avoid1w_R2 <- c_avoid1w_R2[ , c(1, 10, 2, 7, 9, 8)]
+c_avoid1w_R2 <- c_avoid1w_R2[order(c_avoid1w_R2$Variable),]
+```
+
+
+```{r}
+#### participants in first 30 days after stringency rise: Intention in 6 months ####
+c_avoid6m <- lmer(avoid_6m ~ cond + total_cases_per_million + (1|COUNID), 
+                  data = df_cases,
+                  REML = FALSE)
+summary(c_avoid6m)
+
+c_avoid6m_B <- tidy(c_avoid6m,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+c_avoid6m_B$VAR <- "Intention in 6 months"
+
+c_avoid6m_R2 <- data.frame(r2beta(c_avoid6m, 
+                                       partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+c_avoid6m_R2$VAR <- "Intention in 6 months"
+
+c_avoid6m_B <- c_avoid6m_B[ ,c(9,1:8)]
+c_avoid6m_R2 <- c_avoid6m_R2[ , c(1, 10, 2, 7, 9, 8)]
+c_avoid6m_R2 <- c_avoid6m_R2[order(c_avoid6m_R2$Variable),]
+
+#### TABLE 4 ####
+
+cR2_tbl <- rbind(c_manip_R2, c_autmot_R2, c_conmot_R2,
+                c_defy_R2, c_avoid1w_R2, c_avoid6m_R2)
+cR2_tbl$term[cR2_tbl$Effect == "Model"] <- "(Intercept)"
+cR2_tbl$term[cR2_tbl$Effect == "cond2"] <- "cond2"
+cR2_tbl$term[cR2_tbl$Effect == "cond3"] <- "cond3"
+cR2_tbl$term[cR2_tbl$Effect == "total_cases_per_million"] <- "Total cases per million"
+cR2_tbl$term[cR2_tbl$Effect == "BL_avoid"] <- "BL_avoid"
+cR2_tbl <- dplyr::select(cR2_tbl, VAR, term, Rsq, lower.CL, upper.CL)
+write_csv(cR2_tbl, path = "partial R squared table for participants in first 30 days after stringency rise.csv")
+
+cB_tbl <- rbind(c_manip_B, c_autmot_B, c_conmot_B,
+                c_defy_B, c_avoid1w_B, c_avoid6m_B)
+cB_tbl <- dplyr::select(cB_tbl, term, estimate, std.error, statistic, df, p.value)
+write_csv(cB_tbl, path = "Unstandardized B table for participants in first 30 days after stringency rise.csv")
+
+```
+
+
+```{r}
+#### Equivalence test: controlling vs. no message ####
+equi_cond1_mc <- TOSTER::TOSTr(n = 25718, r = -.096, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond1_am <- TOSTER::TOSTr(n = 25718, r = -.012, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond1_cm <- TOSTER::TOSTr(n = 25718, r = -.096, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond1_de <- TOSTER::TOSTr(n = 25718, r = -.003, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond1_1w <- TOSTER::TOSTr(n = 25718, r = .017, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond1_6m <- TOSTER::TOSTr(n = 25718, r = -.001, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+
+
+```
+```{r}
+#### graph condition effect size and 95% CI ####
+equi_cond1 <- data.frame(list(
+  mean = c(equi_cond1_mc$r, equi_cond1_am$r, equi_cond1_cm$r, equi_cond1_de$r, equi_cond1_1w$r, equi_cond1_6m$r),
+  lower = c(equi_cond1_mc$LL_CI_TTEST, equi_cond1_am$LL_CI_TTEST, equi_cond1_cm$LL_CI_TTEST, equi_cond1_de$LL_CI_TTEST, equi_cond1_1w$LL_CI_TTEST, equi_cond1_6m$LL_CI_TTEST),
+  upper = c(equi_cond1_mc$UL_CI_TTEST, equi_cond1_am$UL_CI_TTEST, equi_cond1_cm$UL_CI_TTEST, equi_cond1_de$UL_CI_TTEST, equi_cond1_1w$UL_CI_TTEST, equi_cond1_6m$UL_CI_TTEST)))
+
+tabletext <- c("Perceived control",
+               "Autonomous motivation",
+               "Controlled motivation",
+               "Defiance",
+               "Intention to avoid 1 week",
+               "Intention to avoid 6 months")
+
+forestplot::forestplot(tabletext,
+           equi_cond1, 
+           ci.vertices = TRUE, 
+           grid = structure(c(-.025, .025),
+                            gp = gpar(lty = "dotted")),
+           xticks = c(-.175, -.150, -.125, -.10, -.075, -.050, -0.025, 0, 0.025, 0.050),
+           xticks.digits = 3,
+           txt_gp = fpTxtGp(gpar(fontfamily = "Times New Roman", fontsize = 12),
+                            ticks = gpar(cex = 1)),
+           boxsize = .15,
+           title = "Equivalence tests of partial r (No message vs. Controlling)",
+           graphwidth = unit(.6, "npc"),
+           col = fpColors(box = "royalblue",
+                          line = "darkblue",
+                          summary = "royalblue"))
+```
+
+```{r}
+#### Equivalence test: controlling vs. autonomy supportive ####
+equi_cond2_mc <- TOSTER::TOSTr(n = 25718, r = -.163, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond2_am <- TOSTER::TOSTr(n = 25718, r = .034, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond2_cm <- TOSTER::TOSTr(n = 25718, r = -.027, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond2_de <- TOSTER::TOSTr(n = 25718, r = -.064, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond2_1w <- TOSTER::TOSTr(n = 25718, r = .009, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+equi_cond2_6m <- TOSTER::TOSTr(n = 25718, r = -.010, low_eqbound_r = -0.025, high_eqbound_r = 0.025, alpha = 0.05)
+
+```
+```{r}
+#### graph condition effect size and 95% CI ####
+
+equi_cond2 <- data.frame(list(
+  mean = c(equi_cond2_mc$r, equi_cond2_am$r, equi_cond2_cm$r, equi_cond2_de$r, equi_cond2_1w$r, equi_cond2_6m$r),
+  lower = c(equi_cond2_mc$LL_CI_TTEST, equi_cond2_am$LL_CI_TTEST, equi_cond2_cm$LL_CI_TTEST, equi_cond2_de$LL_CI_TTEST, equi_cond2_1w$LL_CI_TTEST, equi_cond2_6m$LL_CI_TTEST),
+  upper = c(equi_cond2_mc$UL_CI_TTEST, equi_cond2_am$UL_CI_TTEST, equi_cond2_cm$UL_CI_TTEST, equi_cond2_de$UL_CI_TTEST, equi_cond2_1w$UL_CI_TTEST, equi_cond2_6m$UL_CI_TTEST)))
+
+tabletext <- c("Perceived control",
+               "Autonomous motivation",
+               "Controlled motivation",
+               "Defiance",
+               "Intention to avoid 1 week",
+               "Intention to avoid 6 months")
+
+forestplot(tabletext,
+           equi_cond2, 
+           ci.vertices = TRUE, 
+           grid = structure(c(-.025, .025),
+                            gp = gpar(lty = "dotted")),
+           xticks = c(-.175,-.150, -.125, -.10, -.075, -.050, -0.025, 0, 0.025, 0.050),
+           xticks.digits = 3,
+           txt_gp = fpTxtGp(gpar(fontfamily = "Times New Roman", fontsize = 12),
+                            ticks = gpar(cex = 1)),
+           boxsize = .15,
+           title = "Equivalence tests of partial r (Autonomy supportive vs. Controlling)",
+           graphwidth = unit(.6, "npc"),
+           col = fpColors(box = "royalblue",
+                          line = "darkblue",
+                          summary = "royalblue"))
+```
+
+###########################################################
+
+FOR VISUALIZATION ONLY
+
+###########################################################
+
+```{r}
+#### create graphs for data distribution on each main variable ####
+
+data_distr <- dplyr::select(combined_df, ID, BL_avoid, manip, aut_mot, cont_mot, defy, avoid_1w, avoid_6m) 
+
+data_distr$avoid_6m[data_distr$avoid_6m > 24] <- NA
+hist(data_distr$avoid_6m)
+data_distr <- data_distr %>% 
+  pivot_longer(!ID, names_to = "variable", values_to = "score")
+data_distr$variable[data_distr$variable == "BL_avoid"] <- "1-Baseline adherence"
+data_distr$variable[data_distr$variable == "manip"] <- "2-Perceived control"
+data_distr$variable[data_distr$variable == "aut_mot"] <- "3-Autonomous motivation"
+data_distr$variable[data_distr$variable == "cont_mot"] <- "4-Controlled motivation"
+data_distr$variable[data_distr$variable == "defy"] <- "5-Defiance"
+data_distr$variable[data_distr$variable == "avoid_1w"] <- "6-Intention to avoid in 1 week"
+data_distr$variable[data_distr$variable == "avoid_6m"] <- "7-Intention to avoid in 6 months"
+
+jpeg("Figure 2.jpg", width=1000, height=1000, res=150)
+ggplot(data=data_distr, aes(x=score, group=variable, fill=variable)) +
+  geom_density(adjust=1.5, alpha = .7) +
+  scale_colour_brewer(palette = "Dark2")+
+  scale_y_continuous(breaks = c(0, .25, .50, .75, 1.00),
+                     labels = c("0%", "25%", "50%", "75%", "100%"))+
+  scale_fill_brewer(palette = "Dark2")+
+  facet_wrap(~variable, scales = "free_x", ncol = 3)+
+  xlab("Response scales")+
+  ylab("Response distribution")+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(),
+        legend.title = element_blank(), legend.position = "none")
+dev.off()
+
+```
+
+
+```{r}
+## ## ## ## ## ## ## ## ## ## ## ##
+#### SUPPLEMENTARY MATERIALS ####
+## ## ## ## ## ## ## ## ## ## ## ##
+
+####exclude those who have completed the other study in PSA bundle first####
+df_no001 <- dplyr::filter(combined_df, carryover == 0)
+dplyr::count(group_by(df_no001, cond))
+```
+
+```{r}
+
+
+####condition equivalence on avoidance####
+
+#### exclude 001 ####
+condequi_BLavo.model_no001 <- lmer(BL_avoid ~ cond + (1|COUNID), data = df_no001,
+                             REML = FALSE)
+summary(condequi_BLavo.model_no001)
+
+condequi_BLavo_B_no001 <- tidy(condequi_BLavo.model_no001,
+                       conf.int=TRUE,
+                       effects="fixed",
+                       na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+condequi_BLavo_B_no001$VAR <- "Baseline intention exclude 001"
+
+hist(residuals(condequi_BLavo.model_no001))
+condequi_BLavo_R2_no001 <- data.frame(r2beta(condequi_BLavo.model_no001, 
+                                       partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+condequi_BLavo_R2_no001$VAR <- "Baseline intention exclude 001"
+
+condequi_BLavo_B_no001 <- condequi_BLavo_B_no001[ ,c(9,1:8)]
+condequi_BLavo_R2_no001 <- condequi_BLavo_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+condequi_BLavo_R2_no001 <- condequi_BLavo_R2_no001[order(condequi_BLavo_R2_no001$Variable),]
+```
+
+```{r}
+#### Manipulation check ####
+
+### going forward not controlling for initial adherence because no condition effect with new data set, NOT excluding 001
+
+#### exclude 001 ####
+manip.model_no001 <- lmer(manip ~ cond + (1|COUNID), data = df_no001,
+                    REML = FALSE)
+summary(manip.model_no001)
+
+manip.model_B_no001 <- tidy(manip.model_no001,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+manip.model_B_no001$VAR <- "Manipulation exclude 001"
+
+#hist(residuals(condequi_BLavo.model))
+manip_R2_no001 <- data.frame(r2beta(manip.model_no001, 
+                              partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+manip_R2_no001$VAR <- "Manipulation exclude 001"
+
+manip.model_B_no001 <- manip.model_B_no001[ ,c(9,1:8)]
+manip_R2_no001 <- manip_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+manip_R2_no001 <- manip_R2_no001[order(manip_R2_no001$Variable),]
+```
+
+
+```{r}
+####Autonomous motivation####
+#### exclude 001 ####
+aut_mot_no001 <- lmer(aut_mot ~ cond + (1|COUNID), data = df_no001,
+                REML = FALSE) #little variance around the slope
+summary(aut_mot_no001)
+
+aut_mot_B_no001 <- tidy(aut_mot_no001,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+aut_mot_B_no001$VAR <- "Autonomous motivation exclude 001"
+
+#hist(residuals(aut_mot))
+aut_mot_R2_no001 <- data.frame(r2beta(aut_mot_no001,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+aut_mot_R2_no001$VAR <- "Autonomous motivation exclude 001"
+
+aut_mot_B_no001 <- aut_mot_B_no001[ ,c(9,1:8)]
+aut_mot_R2_no001 <- aut_mot_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+aut_mot_R2_no001 <- aut_mot_R2_no001[order(aut_mot_R2_no001$Variable),]
+```
+
+```{r}
+####Controlled motivation####
+#### exclude 001 ####
+cont_mot_no001 <- lmer(cont_mot ~ cond + (1|COUNID), data = df_no001,
+                 REML = FALSE)
+summary(cont_mot_no001)
+
+cont_mot_B_no001 <- tidy(cont_mot_no001,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+cont_mot_B_no001$VAR <- "Controlled motivation exclude 001"
+
+hist(residuals(cont_mot))
+cont_mot_R2_no001 <- data.frame(r2beta(cont_mot_no001,
+                                 partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+cont_mot_R2_no001$VAR <- "Controlled motivation exclude 001"
+
+cont_mot_B_no001 <- cont_mot_B_no001[ ,c(9,1:8)]
+cont_mot_R2_no001 <- cont_mot_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+cont_mot_R2_no001 <- cont_mot_R2_no001[order(cont_mot_R2_no001$Variable),]
+
+```
+
+```{r}
+####Defiance####
+#### Hypothesis 1 ####
+#### exclude 001 ####
+defy.h1_no001 <- lmer(defy ~ cond + (1|COUNID), data = df_no001,
+                REML = FALSE)
+summary(defy.h1_no001)
+
+defy.h1_B_no001 <- tidy(defy.h1_no001,
+                      conf.int=TRUE,
+                      effects="fixed",
+                      na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+defy.h1_B_no001$VAR <- "Defiance Hypothesis 1 exclude 001"
+
+hist(residuals(defy.h1_no001))
+defy.h1_R2_no001 <- data.frame(r2beta(defy.h1_no001,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+defy.h1_R2_no001$VAR <- "Defiance Hypothesis 1 exclude 001"
+
+defy.h1_B_no001 <- defy.h1_B_no001[ ,c(9,1:8)]
+defy.h1_R2_no001 <- defy.h1_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+defy.h1_R2_no001 <- defy.h1_R2_no001[order(defy.h1_R2_no001$Variable),]
+
+#### Hypothesis 2 ####
+#### exclude 001 ####
+defy.h2_no001 <- lmer(defy ~ aut_mot + cont_mot + (1|COUNID), data = df_no001,
+                REML = FALSE)
+summary(defy.h2_no001)
+
+defy.h2_B_no001 <- tidy(defy.h2_no001,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+defy.h2_B_no001$VAR <- "Defiance Hypothesis 2 exclude 001"
+
+hist(residuals(defy.h2_no001))
+defy.h2_R2_no001 <- data.frame(r2beta(defy.h2_no001,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+defy.h2_R2_no001$VAR <- "Defiance Hypothesis 2 exclude 001"
+
+defy.h2_B_no001 <- defy.h2_B_no001[ ,c(9,1:8)]
+defy.h2_R2_no001 <- defy.h2_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+defy.h2_R2_no001 <- defy.h2_R2_no001[order(defy.h2_R2_no001$Variable),]
+
+```
+
+```{r}
+####intention for social distancing in 1 week####
+
+#### Hypothesis 1 ####
+#### exclude 001 ####
+avoid_1w.h1_no001 <- lmer(avoid_1w ~ cond + (1|COUNID), data = df_no001,
+                    REML = FALSE)
+summary(avoid_1w.h1_no001)
+
+avoid_1w.h1_B_no001 <- tidy(avoid_1w.h1_no001,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_1w.h1_B_no001$VAR <- "Intention to avoid 1w Hypothesis 1 exclude 001"
+
+hist(residuals(avoid_1w.h1_no001))
+avoid_1w.h1_R2_no001 <- data.frame(r2beta(avoid_1w.h1_no001,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_1w.h1_R2_no001$VAR <- "Intention to avoid 1w Hypothesis 1 exclude 001"
+
+avoid_1w.h1_B_no001 <- avoid_1w.h1_B_no001[ ,c(9,1:8)]
+avoid_1w.h1_R2_no001 <- avoid_1w.h1_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+avoid_1w.h1_R2_no001 <- avoid_1w.h1_R2_no001[order(avoid_1w.h1_R2_no001$Variable),]
+
+#### Hypothesis 2 ####
+#### exclude 001 ####
+avoid_1w.h2_no001 <- lmer(avoid_1w ~ aut_mot + cont_mot + (1|COUNID), data = df_no001,
+                    REML = FALSE)
+summary(avoid_1w.h2_no001)
+
+avoid_1w.h2_B_no001 <- tidy(avoid_1w.h2_no001,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_1w.h2_B_no001$VAR <- "Intention to avoid 1w Hypothesis 2 exclude 001"
+
+hist(residuals(avoid_1w.h2_no001))
+avoid_1w.h2_R2_no001 <- data.frame(r2beta(avoid_1w.h2_no001,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_1w.h2_R2_no001$VAR <- "Intention to avoid 1w Hypothesis 2 exclude 001"
+
+avoid_1w.h2_B_no001 <- avoid_1w.h2_B_no001[ ,c(9,1:8)]
+avoid_1w.h2_R2_no001 <- avoid_1w.h2_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+avoid_1w.h2_R2_no001 <- avoid_1w.h2_R2_no001[order(avoid_1w.h2_R2_no001$Variable),]
+
+```
+
+```{r}
+####Intention to social distance in 6 months####
+
+#Hypothesis 1
+# exclude 001
+avoid_6m.h1_no001 <- lmer(avoid_6m ~ cond + (1|COUNID), data = df_no001)
+summary(avoid_6m.h1_no001)
+
+avoid_6m.h1_B_no001 <- tidy(avoid_6m.h1_no001,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_6m.h1_B_no001$VAR <- "Intention to avoid 6m Hypothesis 1 exclude 001"
+
+hist(residuals(avoid_6m.h1_no001))
+avoid_6m.h1_R2_no001 <- data.frame(r2beta(avoid_6m.h1_no001,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_6m.h1_R2_no001$VAR <- "Intention to avoid 6m Hypothesis 1 exclude 001"
+
+avoid_6m.h1_B_no001 <- avoid_6m.h1_B_no001[ ,c(9,1:8)]
+avoid_6m.h1_R2_no001 <- avoid_6m.h1_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+avoid_6m.h1_R2_no001 <- avoid_6m.h1_R2_no001[order(avoid_6m.h1_R2_no001$Variable),]
+
+#Hypothesis 2
+# exclude 001
+avoid_6m.h2_no001 <- lmer(avoid_6m ~ aut_mot + cont_mot + (1|COUNID), data = df_no001)
+summary(avoid_6m.h2_no001)
+
+avoid_6m.h2_B_no001 <- tidy(avoid_6m.h2_no001,
+                  conf.int=TRUE,
+                  effects="fixed",
+                  na.action = na.exclude) %>%
+  dplyr::select(c("term", "estimate", "std.error", 
+           "conf.low", "conf.high", 
+           "statistic", "df", "p.value"))
+avoid_6m.h2_B_no001$VAR <- "Intention to avoid 6m Hypothesis 2 exclude 001"
+
+hist(residuals(avoid_6m.h2_no001))
+avoid_6m.h2_R2_no001 <- data.frame(r2beta(avoid_6m.h2_no001,
+                                partial = TRUE, method = "nsj", data = NULL)) %>% 
+  tibble::rownames_to_column('Variable')
+avoid_6m.h2_R2_no001$VAR <- "Intention to avoid 6m Hypothesis 2 exclude 001"
+
+avoid_6m.h2_B_no001 <- avoid_6m.h2_B_no001[ ,c(9,1:8)]
+avoid_6m.h2_R2_no001 <- avoid_6m.h2_R2_no001[ , c(1, 10, 2, 7, 9, 8)]
+avoid_6m.h2_R2_no001 <- avoid_6m.h2_R2_no001[order(avoid_6m.h2_R2_no001$Variable),]
+```
+
+```{r}
+#### TABLE S3 ####
+
+#### combine all R2 tables ####
+
+# exclude 001
+R2_tbl_no001 <- rbind(condequi_BLavo_R2_no001, manip_R2_no001, 
+                aut_mot_R2_no001, cont_mot_R2_no001, 
+                defy.h1_R2_no001, defy.h2_R2_no001, 
+                avoid_1w.h1_R2_no001, avoid_1w.h2_R2_no001, 
+                avoid_6m.h1_R2_no001, avoid_6m.h2_R2_no001)
+
+#### combine all unstandardized B tables ####
+
+# exclude 001
+B_tbl_no001 <- rbind(condequi_BLavo_B_no001, manip.model_B_no001, 
+                aut_mot_B_no001, cont_mot_B_no001, 
+                defy.h1_B_no001, defy.h2_B_no001, 
+                avoid_1w.h1_B_no001, avoid_1w.h2_B_no001, 
+                avoid_6m.h1_B_no001, avoid_6m.h2_B_no001)
+
+write_csv(R2_tbl_no001, path = "partial R squared table exclude 001.csv")
+write_csv(B_tbl_no001, path = "unstandardized B table exclude 001.csv")
+
+
+```
+
+
+```{r}
+#### TABLE S4 ####
+
+#### combine all R2 tables - no exclusion with covariates ####
+
+# no exclusion
+R2_tbl <- rbind(manip.cov_R2, 
+                aut_mot.cov_R2, cont_mot.cov_R2, 
+                defy.cov.h1_R2, defy.cov.h2_R2, 
+                avoid_1w.cov.h1_R2, avoid_1w.cov.h2_R2, 
+                avoid_6m.cov.h1_R2, avoid_6m.cov.h2_R2)
+
+#### combine all unstandardized B tables - no exclusion with covariates ####
+
+# no exclusion
+B_tbl <- rbind(manip.model.cov_B, 
+                aut_mot.model.cov_B, cont_mot.model.cov_B, 
+                defy.cov.h1_B, defy.cov.h2_B, 
+                avoid_1w.cov.h1_B, avoid_1w.cov.h2_B, 
+                avoid_6m.cov.h1_B, avoid_6m.cov.h2_B)
+
+write_csv(R2_tbl, path = "partial R squared table no exclusion with covariates.csv")
+write_csv(B_tbl, path = "unstandardized B table no exclusion with covariates.csv")
+
+```
+

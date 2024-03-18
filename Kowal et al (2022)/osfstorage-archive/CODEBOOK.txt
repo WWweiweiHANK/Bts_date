@@ -1,0 +1,47 @@
+CODEBOOK
+Kowal, M., Sorokowski, P., Pisanski, K., Valentova, J. V., Varella, M. A., Frederick, D. A., ... & Mišetić, K. (2022). Predictors of enhancing human physical attractiveness: Data from 93 countries. Evolution and Human Behavior, 43(6), 455-474. https://doi.org/10.1016/j.evolhumbehav.2022.08.003
+
+Columns:
+"ResponseId"			- Participant's ID
+"Sex"            		- What is your gender? Male (0), Female (1), Non-binary / third gender (2), Prefer not to say (3)
+"Age"                    	- How old are you (in years)?
+"Country_live"           	- Where do you currently live?
+"Relationship_status"    	- What is your relationship status? Single (0), Dating (1), In a committed relationship (2), Married (3) 
+"Time_social_media_1"    	- How much time, on average, do you spend on Social Media each day? (in minutes)
+"Time_watching_TV_1"    	- How much time, on average, do you spend watching TV (including online TV, such as Netflix, HBO, YouTube) each day? (in minutes)
+"Gender_Equality_1"          	- A woman’s most important role is to take care of her home and cook. Definitely disagree (1) - Definitely agree (7)
+"Gender_Equality_2"          	- Changing diapers, giving kids a bath, and feeding kids are the mother’s responsibility. Definitely disagree (1) - Definitely agree (7)    
+"Gender_Equality_3"          	- A man should have the final word about decisions in his home. Definitely disagree (1) - Definitely agree (7)
+"Individualism_col_1"          	- Group welfare is more important than individual rewards. Definitely disagree (1) - Definitely agree (7)
+"Individualism_col_2"          	- Group success is more important than individual success. Definitely disagree (1) - Definitely agree (7)    
+"Individualism_col_3"          	- Being accepted by the members of the workgroup is very important. Definitely disagree (1) - Definitely agree (7)    
+"Individualism_col_4"          	- Employees should pursue their goals only after considering the welfare of the group. Definitely disagree (1) - Definitely agree (7)   
+"Pathogen_Prevalence_1"         - Have you ever contracted (been sick with) any of the following diseases? Leishmanias. Never (0), Once (1), Multimple times (2)
+"Pathogen_Prevalence_2"         - Schistosomes. Never (0), Once (1), Multimple times (2)  
+"Pathogen_Prevalence_3"         - Trypanosomes. Never (0), Once (1), Multimple times (2)  
+"Pathogen_Prevalence_4"         - Leprosy. Never (0), Once (1), Multimple times (2)  
+"Pathogen_Prevalence_5"         - Malaria. Never (0), Once (1), Multimple times (2)
+"Pathogen_Prevalence_6"         - Typhus. Never (0), Once (1), Multimple times (2)  
+"Pathogen_Prevalence_7"         - Filariae. Never (0), Once (1), Multimple times (2)
+"Pathogen_Prevalence_8"         - Dengue. Never (0), Once (1), Multimple times (2)  
+"Pathogen_Prevalence_9"         - Tuberculosis. Never (0), Once (1), Multimple times (2)  
+"Attract_which_exercise"        - Which of these activities do you perform to look better? Please do not check an activity if you perform it only for other reasons than looking better (e.g., you brush your teeth ONLY to stay healthy, and not because you both want to look attractive AND stay healthy; or you exercise to work on your problems with your back, and not to look more attractive). Exercising (e.g., running, doing aerobics, working out at the gym or working out at home, weightlifting, building your muscles). Yes (1), No (0)
+"Attract_which_makeup"          - Applying make-up. Yes (1), No (0)
+"Attract_which_cosmet"          - Using cosmetics (please, think of all the cosmetics you are using, e.g., body lotion, hand cream, face cream, etc.). Yes (1), No (0)   
+"Attract_which_hyg"		- Body hygiene (please, think of all the things you do to care for your body hygiene, including washing your Arms, body, brushing or flossing your teeth, etc.). Yes (1), No (0)
+"Attract_which_hair"		- Hair grooming (e.g., caring for hair, brushing, washing, styling). Yes (1), No (0)
+"Attract_which_dress"		- Dressing nicely (e.g., wearing clothes that make you look better). Yes (1), No (0)
+"Attract_which_diet"		- Caring for diet (e.g., slimming, gaining weight). Yes (1), No (0)
+"Attract_which_other"		- Other. Yes (1), No (0)    
+"Time_A_cosm_1"			- Think about your typical day and the things you do to look attractive. How much time do you spend on the following activities [in minutes]: Using cosmetics (please, think of all the cosmetics you are using, e.g., body lotion, hand cream, face cream, etc.)
+"Time_A_makeup_1"		- Applying make-up
+"Time_A_hyg_1"			- Body hygiene (please, think of all the things you do to care for your body hygiene, including washing your arms, body, brushing or flossing your teeth, etc.) [in minutes/hours]
+"Time_A_exercise_1"		- Exercising (e.g., running, doing aerobics, working out at the gym or working out at home, weightlifting, building your muscles) 
+"Time_A_hair_1" 		- Hair grooming (e.g., caring for hair, brushing, washing, styling) 
+"Time_A_dress_1"		- Dressing nicely (e.g., wearing clothes that make you look better)
+"Time_A_diet_1"			- Caring for diet (e.g., slimming, gaining weight) 
+"Time_A_other_1" 		- [Other activities - inputted previously by the participant]
+"self_physatt" 			- How physically attractive are you? Extremely physically unattractive(Bottom 1 out of 100 people) (1),(Bottom 3 out of 100 people) (2), (Bottom 8 out of 100 people) (3), (Bottom 18 out of 100 people) (4), (Bottom 32 out of 100 people) (5), Average (Top 50 out of 100 people) (6), (Top 32 out of 100 people) (7), (Top 18 out of 100 people) (8), (Top 8 out of 100 people) (9), (Top 3 out of 100 people) (10), Extremely physically attractive(Top 1 out of 100 people) (11) 
+"cot_educ"			- Which of the following answers best describes your level of education? No formal education (1), Primary school only (2), Primary school through Secondary school (3), Primary school through High school or Technical college (4), Primary school through Bachelor's degree (5), Primary school through Master's degree (6), Primary school through PhD, MD, JD, or other advanced degree (7) 
+"cot_politics"			- Which of the following answers best describes your political views? far left political views (1), center left political views (2), center political views (3), center right political views (4), far right political views (5) 
+"cot_class"			- Which of the following answers best describes your social class level? upper class (5), upper middle class (4), middle class (3), lower middle class (2), lower class (1) [Note! This question was already recoded, in the survey, it appeared with the reverse coding]

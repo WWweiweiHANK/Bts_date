@@ -1,0 +1,768 @@
+---
+title: "S3 (Supplement Study 3)"
+output:
+  html_document:
+    number_sections: yes
+    self_contained: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+Last update: 10/09/2023
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+library(sjPlot)
+library(ggpubr)
+library(reshape2)
+library(dplyr)
+library(stringr)
+
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+# hide code chunks 
+# knitr::opts_chunk$set(echo = FALSE)
+
+data <- readRDS("data_study_3.RDS")
+
+```
+
+# Descriptives
+
+## Demographics
+
+### Age
+
+```{r}
+
+psych::describe(data$AGE)
+
+```
+
+### Gender
+
+1 = male, 2 = female
+
+```{r}
+
+table(data$GENDER)
+prop.table(table(data$GENDER))
+
+```
+
+### Vaccination status
+
+2 = primary vaccination; 3 = booster
+
+```{r}
+
+prop.table(table(data$VACSTATUS))
+
+```
+
+# Recall (population model)
+
+## Experimental conditions
+
+1 = incentive
+2 = no incentive
+
+```{r}
+
+table(data$INCENTIVE)
+
+```
+
+## Visualization
+
+Preregistered analysis: T&B model with moderation by experimental condition
+
+```{r fig.width=9, fig.height=6}
+
+getLineParams <- function(p1, p2) {
+  m = (p1[2]-p2[2])/(p1[1]-p2[1])
+  n = p1[2] - m * p1[1]
+  return(c(m,n))
+}
+
+plotcounter = 0
+chars = c("A", "B", "C", "D", "E", "F")
+
+plotModeratedTBM <- function(variable) {
+  
+  plotcounter <<- plotcounter + 1;
+  
+  truthVar <- paste0(variable, "_T1")
+  biasVar <- variable
+  recallVar <- paste0(variable, "_RE")
+  min <- 1
+  max <- max(dataset[variable])
+  mid <- min + (max-min)/2
+  
+  plotdata <- as.data.frame(expand.grid(c(((min*100):(max*100)))/100, c((min*100):(max*100))/100, c("control","incentive")))
+  names(plotdata) <- c(truthVar, biasVar, "INCENTIVE")
+  plotdata$RECALL <- pmax(pmin(predict(lm(formula=paste(recallVar, "~", truthVar, "*INCENTIVE +", biasVar,"*INCENTIVE"), data = dataset), plotdata), max), min)
+  names(plotdata) <- c("TRUTH", "BIAS", "INCENTIVE", "RECALL")
+
+  lines <- data.frame(
+    INCENTIVE = character(),
+    NAME = character(),
+    M = numeric(),
+    N = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  
+  for (incentive in unique(plotdata$INCENTIVE)) {
+    
+    subset <- plotdata[plotdata$INCENTIVE == incentive,]
+    
+    p1_left <- as.numeric(subset %>% filter(TRUTH == min) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    p1_top <- as.numeric(subset %>% filter(BIAS == max) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    if(abs(p1_left[3]-mid) < abs(p1_top[3]-mid)) {
+      p1 <- p1_left
+    } else {
+      p1 <- p1_top
+    }
+  
+    p2_right <- as.numeric(subset %>% filter(TRUTH == max) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    p2_bottom <- as.numeric(subset %>% filter(BIAS == min) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    if(abs(p2_right[3]-mid) < abs(p2_bottom[3]-mid)) {
+      p2 <- p2_right
+    } else {
+      p2 <- p2_bottom
+    }
+    
+    lines[nrow(lines)+1,] <- list(incentive, "MEAN", getLineParams(p1, p2)[1], getLineParams(p1, p2)[2])
+    
+  }
+  
+  
+  
+    
+  ggplot(data=plotdata, aes(TRUTH, BIAS, z = RECALL)) +
+    geom_raster(aes(fill = RECALL)) +
+    theme_minimal() + scale_fill_gradientn(
+      guide = "none",
+      name = "Recall (Jan 23)",
+      breaks = c(min,max),
+      limits = c(min,max),
+      labels = c("1", "7"),
+      colours = c("#FFFFFF", "#FFFFFF", "#FFFFFF")
+    ) + scale_x_continuous(
+      name = ifelse(plotcounter %in% c(4,5,6), "Past rating", ""),
+      breaks = c(min:max)
+    ) + scale_y_continuous(
+      name = ifelse(plotcounter %in% c(1,4), "Present rating", ""),
+      breaks = c(min:max)
+    ) + theme(
+      panel.grid = element_blank(),
+      panel.border = element_rect(colour = "black", fill=NA, size=0.4),
+      axis.ticks.x = element_line(color = "#000000", linetype = "solid", size=0.25),
+      axis.ticks.y = element_line(color = "#000000", linetype = "solid", size=0.25),
+      strip.text = element_text(color="#000000", size=10, angle=0),
+      axis.text.y = element_text(color="#000000", size=10, angle=0),
+      axis.title.y = element_text(color="#000000", size=10, angle=90),
+      axis.title.x = element_text(color="#000000", size=10, angle=0),
+      axis.text.x = element_text(color="#000000", size=10, angle=0),
+      plot.title = element_text(color="#000000", size=10, angle=0, face="bold"),
+      legend.text = element_text(color="#000000", size=10, angle=0),
+      legend.title = element_text(color="#000000", size=10, angle=0),
+      legend.position = "bottom"
+    ) + coord_fixed(
+      ratio=1, 
+      expand = 0
+    ) + geom_hline(
+      yintercept = mid, 
+      size = 0.2
+    ) + geom_vline(
+      xintercept = mid, 
+      size = 0.2
+    ) + geom_abline(
+      data=lines, 
+      aes(slope=M, intercept=N, linetype=INCENTIVE, color=factor(INCENTIVE)), 
+      size=0.6,
+      color = "#8D9EFF"
+    ) + scale_linetype_manual(
+      name = "",
+      labels = c(
+        "incentive" = "Incentive",
+        "control" = "No incentive"
+      ),
+      values = c(
+        "incentive" = "solid",
+        "control" = "dotted"
+      )
+    ) + scale_color_manual(
+      name = "Recall (at scale midpoint) for   ",
+      labels = c(
+        "0" = "Unvaccinated",
+        "1" = "Vaccinated"
+      ),
+      values = c(
+        "0" = "#FF7000",
+        "1" = "#8D9EFF"
+      )
+    ) + ggtitle(
+      paste0("(", chars[plotcounter], ") ", variables.names[plotcounter])
+    ) + guides(linetype=guide_legend(nrow=1,byrow=TRUE))
+  
+}
+
+# All participants
+dataset = data
+variables = c("PROB", "SEVERITY", "USE_MASK", "USE_AVOIDCONTACTS", "TRUST_GOV", "EXAGG")
+variables.names = c("Infection probability", "Infection severity", "Mask wearing", "Contact avoidance", "Trust in government", "Exaggeration perception")
+
+plotlist <- purrr::map(variables, plotModeratedTBM)
+fig_a <- ggarrange(plotlist = plotlist, common.legend = TRUE, legend = "bottom")
+
+fig_a
+
+png("fig_2.png",height=16,width=22,units="cm",res=300)
+print(fig_a)
+dev.off()
+
+pdf("fig_2.pdf",height=6,width=10)
+print(fig_a)
+dev.off()
+
+```
+
+
+```{r fig.width=9, fig.height=6, include=FALSE, eval = FALSE, include=FALSE, echo=FALSE}
+
+# Exploratory visualization including vaccination status identification
+
+getLineParams <- function(p1, p2) {
+  m = (p1[2]-p2[2])/(p1[1]-p2[1])
+  n = p1[2] - m * p1[1]
+  return(c(m,n))
+}
+
+plotcounter = 0
+chars = c("A", "B", "C", "D", "E", "F")
+
+plotModeratedTBM <- function(variable) {
+  
+  plotcounter <<- plotcounter + 1;
+  
+  truthVar <- paste0(variable, "_T1")
+  biasVar <- variable
+  recallVar <- paste0(variable, "_RE")
+  min <- 1
+  max <- max(dataset[variable])
+  mid <- min + (max-min)/2
+  vsi_mean <- mean(dataset$IDENT)
+  vsi_high <- mean(dataset$IDENT) + sd(dataset$IDENT)
+  vsi_low <- mean(dataset$IDENT) - sd(dataset$IDENT)
+  
+  plotdata <- as.data.frame(expand.grid(c(((min*100):(max*100)))/100, c((min*100):(max*100))/100, c("control","incentive"), c(vsi_low, vsi_mean, vsi_high)))
+  names(plotdata) <- c(truthVar, biasVar, "INCENTIVE", "IDENT")
+  plotdata$RECALL <- pmax(pmin(predict(lm(formula=paste(recallVar, "~", truthVar, "*INCENTIVE*IDENT +", biasVar,"*INCENTIVE*IDENT"), data = dataset), plotdata), max), min)
+  names(plotdata) <- c("TRUTH", "BIAS", "INCENTIVE", "IDENT",  "RECALL")
+  plotdata$IDENT <- factor(ifelse(plotdata$IDENT == vsi_low, "low", ifelse(plotdata$IDENT == vsi_mean, "mean", "high")))
+
+  lines <- data.frame(
+    INCENTIVE = character(),
+    IDENT = character(),
+    NAME = character(),
+    M = numeric(),
+    N = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  
+  for (incentive in unique(plotdata$INCENTIVE)) {
+    for (ident in unique(plotdata$IDENT)) {
+    
+    subset <- plotdata[plotdata$INCENTIVE == incentive & plotdata$IDENT == ident,]
+    
+    p1_left <- as.numeric(subset %>% filter(TRUTH == min) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    p1_top <- as.numeric(subset %>% filter(BIAS == max) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    if(abs(p1_left[3]-mid) < abs(p1_top[3]-mid)) {
+      p1 <- p1_left
+    } else {
+      p1 <- p1_top
+    }
+  
+    p2_right <- as.numeric(subset %>% filter(TRUTH == max) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    p2_bottom <- as.numeric(subset %>% filter(BIAS == min) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    if(abs(p2_right[3]-mid) < abs(p2_bottom[3]-mid)) {
+      p2 <- p2_right
+    } else {
+      p2 <- p2_bottom
+    }
+    
+    lines[nrow(lines)+1,] <- list(incentive, ident, "MEAN", getLineParams(p1, p2)[1], getLineParams(p1, p2)[2])
+    }
+  }
+  
+  
+  
+    
+  ggplot(data=plotdata, aes(TRUTH, BIAS, z = RECALL)) +
+    geom_raster(aes(fill = RECALL)) +
+    theme_minimal() + scale_fill_gradientn(
+      guide = "none",
+      name = "Recall (Jan 23)",
+      breaks = c(min,max),
+      limits = c(min,max),
+      labels = c("1", "7"),
+      colours = c("#FFFFFF", "#FFFFFF", "#FFFFFF")
+    ) + scale_x_continuous(
+      name = ifelse(plotcounter %in% c(4,5,6), "Past rating", ""),
+      breaks = c(min:max)
+    ) + scale_y_continuous(
+      name = ifelse(plotcounter %in% c(1,4), "Present rating", ""),
+      breaks = c(min:max)
+    ) + theme(
+      panel.grid = element_blank(),
+      panel.border = element_rect(colour = "black", fill=NA, size=0.4),
+      axis.ticks.x = element_line(color = "#000000", linetype = "solid", size=0.25),
+      axis.ticks.y = element_line(color = "#000000", linetype = "solid", size=0.25),
+      strip.text = element_text(color="#000000", size=10, angle=0),
+      axis.text.y = element_text(color="#000000", size=10, angle=0),
+      axis.title.y = element_text(color="#000000", size=10, angle=90),
+      axis.title.x = element_text(color="#000000", size=10, angle=0),
+      axis.text.x = element_text(color="#000000", size=10, angle=0),
+      plot.title = element_text(color="#000000", size=10, angle=0, face="bold"),
+      legend.text = element_text(color="#000000", size=10, angle=0),
+      legend.title = element_text(color="#000000", size=10, angle=0),
+      legend.position = "bottom"
+    ) + coord_fixed(
+      ratio=1, 
+      expand = 0
+    ) + geom_hline(
+      yintercept = mid, 
+      size = 0.2
+    ) + geom_vline(
+      xintercept = mid, 
+      size = 0.2
+    ) + geom_abline(
+      data=lines, 
+      aes(slope=M, intercept=N, linetype=factor(IDENT), color=factor(INCENTIVE), alpha = factor(IDENT)), 
+      size=0.6
+    ) + scale_alpha_manual(
+      name = "Identification",
+      labels = c(
+        "high" = "+1SD",
+        "mean" = "M",
+        "low" = "-1SD"
+      ),
+      values = c(
+        "high" = 0.5,
+        "mean" = 1,
+        "low" = 0.5
+      )
+    ) + scale_linetype_manual(
+      name = "Identification",
+      labels = c(
+        "high" = "+1SD",
+        "mean" = "M",
+        "low" = "-1SD"
+      ),
+      values = c(
+        "high" = "solid",
+        "mean" = "dashed",
+        "low" = "dotted"
+      )
+    ) + scale_color_manual(
+      name = "Recall (at scale midpoint) for   ",
+      labels = c(
+        "control" = "No incentive",
+        "incentive" = "Incentive"
+      ),
+      values = c(
+        "incentive" = "#FF7000",
+        "control" = "#8D9EFF"
+      )
+    ) + ggtitle(
+      paste0("(", chars[plotcounter], ") ", variables.names[plotcounter])
+    ) + guides(linetype=guide_legend(nrow=1,byrow=TRUE))
+  
+}
+
+# All participants
+dataset = data
+variables = c("PROB", "SEVERITY", "USE_MASK", "USE_AVOIDCONTACTS", "TRUST_GOV", "EXAGG")
+variables.names = c("Infection probability", "Infection severity", "Mask wearing", "Contact avoidance", "Trust in government", "Exaggeration perception")
+
+plotlist <- purrr::map(variables, plotModeratedTBM)
+fig_b <- ggarrange(plotlist = plotlist, common.legend = TRUE, legend = "bottom")
+
+fig_b
+
+```
+
+## Regression tables
+
+```{r}
+
+# center variables
+data$PROB_RE_C <- datawizard::center(data$PROB_RE, reference=data$PROB_T1)
+data$PROB_T1_C <- datawizard::center(data$PROB_T1, reference=data$PROB_T1)
+data$PROB_C <- datawizard::center(data$PROB, reference=data$PROB_T1)
+
+data$SEVERITY_RE_C <- datawizard::center(data$SEVERITY_RE, reference=data$SEVERITY_T1)
+data$SEVERITY_T1_C <- datawizard::center(data$SEVERITY_T1, reference=data$SEVERITY_T1)
+data$SEVERITY_C <- datawizard::center(data$SEVERITY, reference=data$SEVERITY_T1)
+
+data$USE_MASK_RE_C <- datawizard::center(data$USE_MASK_RE, reference=data$USE_MASK_T1)
+data$USE_MASK_T1_C <- datawizard::center(data$USE_MASK_T1, reference=data$USE_MASK_T1)
+data$USE_MASK_C <- datawizard::center(data$USE_MASK, reference=data$USE_MASK_T1)
+
+data$USE_AVOIDCONTACTS_RE_C <- datawizard::center(data$USE_AVOIDCONTACTS_RE, reference=data$USE_AVOIDCONTACTS_T1)
+data$USE_AVOIDCONTACTS_T1_C <- datawizard::center(data$USE_AVOIDCONTACTS_T1, reference=data$USE_AVOIDCONTACTS_T1)
+data$USE_AVOIDCONTACTS_C <- datawizard::center(data$USE_AVOIDCONTACTS, reference=data$USE_AVOIDCONTACTS_T1)
+
+data$TRUST_GOV_RE_C <- datawizard::center(data$TRUST_GOV_RE, reference=data$TRUST_GOV_T1)
+data$TRUST_GOV_T1_C <- datawizard::center(data$TRUST_GOV_T1, reference=data$TRUST_GOV_T1)
+data$TRUST_GOV_C <- datawizard::center(data$TRUST_GOV, reference=data$TRUST_GOV_T1)
+
+data$EXAGG_RE_C <- datawizard::center(data$EXAGG_RE, reference=data$EXAGG_T1)
+data$EXAGG_T1_C <- datawizard::center(data$EXAGG_T1, reference=data$EXAGG_T1)
+data$EXAGG_C <- datawizard::center(data$EXAGG, reference=data$EXAGG_T1)
+
+data$TIME_RE_C <- datawizard::center(data$TIME_RE, reference=data$TIME_SURVEY_T1_CAT)
+data$TIME_SURVEY_T1_CAT_C <- datawizard::center(data$TIME_SURVEY_T1_CAT, reference=data$TIME_SURVEY_T1_CAT)
+data$TIME_SURVEY_CAT_C <- datawizard::center(data$TIME_SURVEY_CAT, reference=data$TIME_SURVEY_T1_CAT)
+
+col_labels <- c("Preregistered model", "Preregistered model plus vaccination status identification moderation", "Base model")
+
+```
+
+### Infection probability
+
+```{r}
+
+model_baseline <- lm(PROB_RE_C ~ PROB_T1_C* IDENT  + PROB_C* IDENT , data=data )
+
+model_prereg <- lm(PROB_RE_C ~ PROB_T1_C * INCENTIVE + PROB_C * INCENTIVE, data=data)
+model_explo <- lm(PROB_RE_C ~ PROB_T1_C * INCENTIVE * IDENT + PROB_C * INCENTIVE * IDENT, data=data)
+
+tab_model(model_prereg, model_explo, model_baseline, dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "PROB_T1_C" = "Past evaluation",
+  "INCENTIVEincentive" = "Incentive (Baseline: No incentive)",
+  "PROB_C" = "Present evaluation",
+  "PROB_T1_C:INCENTIVEincentive" = "Interaction: Past evaluation x Incentive",
+  "INCENTIVEincentive:PROB_C" = "Interaction: Present evaluation x Incentive",
+  "IDENT" = "Vaccination status identification",
+  "PROB_T1_C:IDENT" = "Interaction: Past evaluation x Identification",
+  "INCENTIVEincentive:IDENT" = "Interaction: Incentive x Identification",
+  "IDENT:PROB_C" = "Interaction: Present evaluation x Identification",
+  "PROB_T1_C:INCENTIVEincentive:IDENT" = "Interaction: Past evaluation x Incentive x Identification",
+  "INCENTIVEincentive:IDENT:PROB_C" = "Interaction: Present evaluation x Incentive x Identification"
+))
+
+```
+
+### Infection severity
+
+```{r}
+
+model_baseline <- lm(SEVERITY_RE_C ~ SEVERITY_T1_C* IDENT  + SEVERITY_C* IDENT , data=data )
+
+model_prereg <- lm(SEVERITY_RE_C ~ SEVERITY_T1_C * INCENTIVE + SEVERITY_C * INCENTIVE, data=data)
+model_explo <- lm(SEVERITY_RE_C ~ SEVERITY_T1_C * INCENTIVE * IDENT + SEVERITY_C * INCENTIVE * IDENT, data=data)
+
+tab_model(model_prereg, model_explo, model_baseline, dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "SEVERITY_T1_C" = "Past evaluation",
+  "INCENTIVEincentive" = "Incentive (Baseline: No incentive)",
+  "SEVERITY_C" = "Present evaluation",
+  "SEVERITY_T1_C:INCENTIVEincentive" = "Interaction: Past evaluation x Incentive",
+  "INCENTIVEincentive:SEVERITY_C" = "Interaction: Present evaluation x Incentive",
+  "IDENT" = "Vaccination status identification",
+  "SEVERITY_T1_C:IDENT" = "Interaction: Past evaluation x Identification",
+  "INCENTIVEincentive:IDENT" = "Interaction: Incentive x Identification",
+  "IDENT:SEVERITY_C" = "Interaction: Present evaluation x Identification",
+  "SEVERITY_T1_C:INCENTIVEincentive:IDENT" = "Interaction: Past evaluation x Incentive x Identification",
+  "INCENTIVEincentive:IDENT:SEVERITY_C" = "Interaction: Present evaluation x Incentive x Identification"
+))
+
+```
+
+### Mask wearing
+
+```{r}
+
+model_baseline <- lm(USE_MASK_RE_C ~ USE_MASK_T1_C* IDENT  + USE_MASK_C* IDENT , data=data )
+
+model_prereg <- lm(USE_MASK_RE_C ~ USE_MASK_T1_C * INCENTIVE + USE_MASK_C * INCENTIVE, data=data)
+model_explo <- lm(USE_MASK_RE_C ~ USE_MASK_T1_C * INCENTIVE * IDENT + USE_MASK_C * INCENTIVE * IDENT, data=data)
+
+tab_model(model_prereg, model_explo, model_baseline, dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "USE_MASK_T1_C" = "Past evaluation",
+  "INCENTIVEincentive" = "Incentive (Baseline: No incentive)",
+  "USE_MASK_C" = "Present evaluation",
+  "USE_MASK_T1_C:INCENTIVEincentive" = "Interaction: Past evaluation x Incentive",
+  "INCENTIVEincentive:USE_MASK_C" = "Interaction: Present evaluation x Incentive",
+  "IDENT" = "Vaccination status identification",
+  "USE_MASK_T1_C:IDENT" = "Interaction: Past evaluation x Identification",
+  "INCENTIVEincentive:IDENT" = "Interaction: Incentive x Identification",
+  "IDENT:USE_MASK_C" = "Interaction: Present evaluation x Identification",
+  "USE_MASK_T1_C:INCENTIVEincentive:IDENT" = "Interaction: Past evaluation x Incentive x Identification",
+  "INCENTIVEincentive:IDENT:USE_MASK_C" = "Interaction: Present evaluation x Incentive x Identification"
+))
+
+```
+
+### Contact avoidance
+
+```{r}
+
+model_baseline <- lm(USE_AVOIDCONTACTS_RE_C ~ USE_AVOIDCONTACTS_T1_C*IDENT  + USE_AVOIDCONTACTS_C*IDENT , data=data )
+
+model_prereg <- lm(USE_AVOIDCONTACTS_RE_C ~ USE_AVOIDCONTACTS_T1_C * INCENTIVE + USE_AVOIDCONTACTS_C * INCENTIVE, data=data)
+model_explo <- lm(USE_AVOIDCONTACTS_RE_C ~ USE_AVOIDCONTACTS_T1_C * INCENTIVE * IDENT + USE_AVOIDCONTACTS_C * INCENTIVE * IDENT, data=data)
+
+tab_model(model_prereg, model_explo, model_baseline, dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "USE_AVOIDCONTACTS_T1_C" = "Past evaluation",
+  "INCENTIVEincentive" = "Incentive (Baseline: No incentive)",
+  "USE_AVOIDCONTACTS_C" = "Present evaluation",
+  "USE_AVOIDCONTACTS_T1_C:INCENTIVEincentive" = "Interaction: Past evaluation x Incentive",
+  "INCENTIVEincentive:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Incentive",
+  "IDENT" = "Vaccination status identification",
+  "USE_AVOIDCONTACTS_T1_C:IDENT" = "Interaction: Past evaluation x Identification",
+  "INCENTIVEincentive:IDENT" = "Interaction: Incentive x Identification",
+  "IDENT:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Identification",
+  "USE_AVOIDCONTACTS_T1_C:INCENTIVEincentive:IDENT" = "Interaction: Past evaluation x Incentive x Identification",
+  "INCENTIVEincentive:IDENT:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Incentive x Identification"
+))
+
+```
+
+### Trust in government
+
+```{r}
+
+model_baseline <- lm(TRUST_GOV_RE_C ~ TRUST_GOV_T1_C*IDENT  + TRUST_GOV_C*IDENT , data=data )
+
+model_prereg <- lm(TRUST_GOV_RE_C ~ TRUST_GOV_T1_C * INCENTIVE + TRUST_GOV_C * INCENTIVE, data=data)
+model_explo <- lm(TRUST_GOV_RE_C ~ TRUST_GOV_T1_C * INCENTIVE * IDENT + TRUST_GOV_C * INCENTIVE * IDENT, data=data)
+
+tab_model(model_prereg, model_explo, model_baseline, dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "TRUST_GOV_T1_C" = "Past evaluation",
+  "INCENTIVEincentive" = "Incentive (Baseline: No incentive)",
+  "TRUST_GOV_C" = "Present evaluation",
+  "TRUST_GOV_T1_C:INCENTIVEincentive" = "Interaction: Past evaluation x Incentive",
+  "INCENTIVEincentive:TRUST_GOV_C" = "Interaction: Present evaluation x Incentive",
+  "IDENT" = "Vaccination status identification",
+  "TRUST_GOV_T1_C:IDENT" = "Interaction: Past evaluation x Identification",
+  "INCENTIVEincentive:IDENT" = "Interaction: Incentive x Identification",
+  "IDENT:TRUST_GOV_C" = "Interaction: Present evaluation x Identification",
+  "TRUST_GOV_T1_C:INCENTIVEincentive:IDENT" = "Interaction: Past evaluation x Incentive x Identification",
+  "INCENTIVEincentive:IDENT:TRUST_GOV_C" = "Interaction: Present evaluation x Incentive x Identification"
+))
+
+```
+
+### Exaggeration perception
+
+```{r}
+
+model_baseline <- lm(EXAGG_RE_C ~ EXAGG_T1_C*IDENT  + EXAGG_C*IDENT , data=data )
+
+model_prereg <- lm(EXAGG_RE_C ~ EXAGG_T1_C * INCENTIVE + EXAGG_C * INCENTIVE, data=data)
+model_explo <- lm(EXAGG_RE_C ~ EXAGG_T1_C * INCENTIVE * IDENT + EXAGG_C * INCENTIVE * IDENT, data=data)
+
+tab_model(model_prereg, model_explo, model_baseline, dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "EXAGG_T1_C" = "Past evaluation",
+  "INCENTIVEincentive" = "Incentive (Baseline: No incentive)",
+  "EXAGG_C" = "Present evaluation",
+  "EXAGG_T1_C:INCENTIVEincentive" = "Interaction: Past evaluation x Incentive",
+  "INCENTIVEincentive:EXAGG_C" = "Interaction: Present evaluation x Incentive",
+  "IDENT" = "Vaccination status identification",
+  "EXAGG_T1_C:IDENT" = "Interaction: Past evaluation x Identification",
+  "INCENTIVEincentive:IDENT" = "Interaction: Incentive x Identification",
+  "IDENT:EXAGG_C" = "Interaction: Present evaluation x Identification",
+  "EXAGG_T1_C:INCENTIVEincentive:IDENT" = "Interaction: Past evaluation x Incentive x Identification",
+  "INCENTIVEincentive:IDENT:EXAGG_C" = "Interaction: Present evaluation x Incentive x Identification"
+))
+
+```
+
+## Mixed effects regression
+
+```{r}
+
+data$ID <- data$p_0001
+
+variables <- c("PROB", "SEVERITY", "USE_MASK", "USE_AVOIDCONTACTS", "TRUST_GOV", "EXAGG")
+
+variables.names <- c(
+    "PROB" = "Infection probability",
+    "SEVERITY" = "Infection severity",
+    "TRUST_GOV" = "Trust in government",
+    "EXAGG" = "Exaggeration perceptions",
+    "USE_MASK" = "Mask wearing",
+    "USE_AVOIDCONTACTS" = "Avoiding contacts"
+)
+
+t1variables <- paste0(variables,"_T1")
+t1variables.names <- variables.names
+names(t1variables.names) <- paste0(names(t1variables.names),"_T1")
+
+revariables <- paste0(variables,"_RE")
+revariables.names <- variables.names
+names(revariables.names) <- paste0(names(revariables.names),"_RE")
+
+biasvariables <- paste0(variables)
+biasvariables.names <- variables.names
+names(biasvariables.names) <- paste0(names(biasvariables.names),"_BIAS")
+
+stdbiasvariables <- paste0(variables,"_BIAS_STD")
+stdbiasvariables.names <- variables.names
+names(stdbiasvariables.names) <- paste0(names(stdbiasvariables.names),"_BIAS_STD")
+
+
+long <- melt(data[,c("ID", "INCENTIVE", "IDENT", t1variables, revariables, variables)], id=c("ID", "INCENTIVE", "IDENT"))
+
+long$TYPE <- ifelse(str_detect(long$variable, "_RE"), "RECALL", ifelse(str_detect(long$variable, "_T1"), "TRUTH", "BIAS"))
+
+long$VAR <- ifelse(long$TYPE != "BIAS", substring(long$variable, 1, str_length(long$variable)-3), substring(long$variable,1))
+
+# pomp values since some are 5-point items and some are 7-point
+#long$VALUE_POMP <- ifelse(long$VAR == "USE_MASK" | long$VAR == "USE_AVOIDCONTACTS", (long$value-1)/4, (long$value-1)/6)
+
+# reverse exaggeration perception as these are negatively correlated with the other variables
+#long$VALUE_POMP <- ifelse(long$VAR == "EXAGG", 1-long$VALUE_POMP, #long$VALUE_POMP) 
+
+# long to wide
+wide <- dcast(long, VAR+ID+INCENTIVE+IDENT ~ TYPE, value.var = "value", fun.aggregate = mean)
+
+model_1 <- lme4::lmer(RECALL ~ TRUTH * INCENTIVE + BIAS * INCENTIVE + (1|ID), data = wide)
+
+model_2 <- lme4::lmer(RECALL ~ TRUTH * IDENT * INCENTIVE + BIAS * IDENT * INCENTIVE + (1|ID), data = wide)
+
+tab_model(model_1, model_2, show.se = TRUE, pred.labels = c(
+  "TRUTH" = "Past evaluation", 
+  "BIAS" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "INCENTIVEincentive" = "Incentive (Baseline: No incentive)",
+  "TRUTH:INCENTIVEincentive" = "Interaction: Past evaluation x Incentive",
+  "INCENTIVEincentive:BIAS" = "Interaction: Present evaluation x Incentive",
+  "IDENT" = "Vaccination status identification",
+  "TRUTH:IDENT" = "Interaction: Past evaluation x Identification",
+  "IDENT:INCENTIVEincentive" = "Interaction: Incentive x Identification",
+  "IDENT:BIAS" = "Interaction: Present evaluation x Identification",
+  "TRUTH:IDENT:INCENTIVEincentive" = "Interaction: Past evaluation x Incentive x Identification",
+  "IDENT:INCENTIVEincentive:BIAS" = "Interaction: Present evaluation x Incentive x Identification"), dv.labels=c("Recall (base model)", "Recall (extended model including vaccination status identification)")
+)
+
+```
+
+## Neutral item 
+
+```{r}
+
+model_baseline <- lm(TIME_RE_C ~ TIME_SURVEY_T1_CAT_C*IDENT  + TIME_SURVEY_CAT_C*IDENT , data=data )
+
+model_prereg <- lm(TIME_RE_C ~ TIME_SURVEY_T1_CAT_C * INCENTIVE + TIME_SURVEY_CAT_C * INCENTIVE, data=data)
+model_explo <- lm(TIME_RE_C ~ TIME_SURVEY_T1_CAT_C * INCENTIVE * IDENT + TIME_SURVEY_CAT_C * INCENTIVE * IDENT, data=data)
+
+tab_model(model_prereg, model_explo, model_baseline, show.se = TRUE, pred.labels = c(
+  "TIME_SURVEY_T1_CAT_C" = "Past participation time",
+  "INCENTIVEincentive" = "Incentive (Baseline: No incentive)",
+  "TIME_SURVEY_CAT_C" = "Present participation time",
+  "TIME_SURVEY_T1_CAT_C:INCENTIVEincentive" = "Interaction: Past time x Incentive",
+  "INCENTIVEincentive:TIME_SURVEY_CAT_C" = "Interaction: Present time x Incentive",
+  "IDENT" = "Vaccination status identification",
+  "TIME_SURVEY_T1_CAT_C:IDENT" = "Interaction: Past time x Identification",
+  "INCENTIVEincentive:IDENT" = "Interaction: Incentive x Identification",
+  "IDENT:TIME_SURVEY_CAT_C" = "Interaction: Present time x Identification",
+  "TIME_SURVEY_T1_CAT_C:INCENTIVEincentive:IDENT" = "Interaction: Past time x Incentive x Identification",
+  "INCENTIVEincentive:IDENT:TIME_SURVEY_CAT_C" = "Interaction: Present time x Incentive x Identification"
+), dv.labels = c("Incentive model", "Incentive model plus vaccination status identification moderation", "Base model"))
+
+bayestestR::equivalence_test(model_prereg)
+
+```
+
+# Recall (individual model)
+
+```{r}
+
+data$ID = data$p_0001
+
+variables = c("PROB", "SEVERITY", "USE_MASK", "USE_AVOIDCONTACTS", "TRUST_GOV", "EXAGG")
+
+variables.names <- c(
+    "PROB" = "Infection probability",
+    "SEVERITY" = "Infection severity",
+    "TRUST_GOV" = "Trust in government",
+    "EXAGG" = "Exaggeration perceptions",
+    "USE_MASK" = "Mask wearing",
+    "USE_AVOIDCONTACTS" = "Avoiding contacts"
+)
+
+t1variables <- paste0(variables,"_T1")
+t1variables.names <- variables.names
+names(t1variables.names) <- paste0(names(t1variables.names),"_T1")
+
+revariables <- paste0(variables,"_RE")
+revariables.names <- variables.names
+names(revariables.names) <- paste0(names(revariables.names),"_RE")
+
+biasvariables <- paste0(variables)
+biasvariables.names <- variables.names
+names(biasvariables.names) <- paste0(names(biasvariables.names),"_BIAS")
+
+stdbiasvariables <- paste0(variables,"_BIAS_STD")
+stdbiasvariables.names <- variables.names
+names(stdbiasvariables.names) <- paste0(names(stdbiasvariables.names),"_BIAS_STD")
+
+
+long <- melt(data[,c("ID", t1variables, revariables, variables)], id=c("ID"))
+
+long$TYPE <- ifelse(str_detect(long$variable, "_RE"), "RECALL", ifelse(str_detect(long$variable, "_T1"), "TRUTH", "BIAS"))
+
+long$VAR <- ifelse(long$TYPE != "BIAS", substring(long$variable, 1, str_length(long$variable)-3), substring(long$variable,1))
+
+# pomp values since some are 5-point items and some are 7-point
+long$VALUE_POMP <- ifelse(long$VAR == "USE_MASK" | long$VAR == "USE_AVOIDCONTACTS", (long$value-1)/4, (long$value-1)/6)
+
+# reverse exaggeration perception as these are negatively correlated with the other variables
+long$VALUE_POMP <- ifelse(long$VAR == "EXAGG", 1-long$VALUE_POMP, long$VALUE_POMP) 
+
+#long$VALUE <- long$value
+
+# do not remove or invert variables as all 6 present ratings are positively correlated
+
+# long to wide
+wide <- dcast(long, VAR+ID ~ TYPE, value.var = "VALUE_POMP", fun.aggregate = mean)
+
+### truth centering by individual
+tb <- wide %>% dplyr::group_by(ID) %>% plyr::summarize(
+  ID = ID,
+  RECALL_C = datawizard::center(RECALL, reference=TRUTH),
+  BIAS_C = datawizard::center(BIAS, reference=TRUTH),
+  TRUTH_C = datawizard::center(TRUTH, reference=TRUTH)
+)
+
+### regression by individual
+regs <- tb %>% dplyr::group_by(ID) %>% do(MODEL = lm(RECALL_C ~ BIAS_C + TRUTH_C, data = .))
+regs <- regs %>% rowwise() %>% dplyr::mutate(
+  DIRECTIONAL_BIAS = MODEL$coefficients[1],
+  BIAS_FORCE = MODEL$coefficients[2],
+  TRUTH_FORCE = MODEL$coefficients[3]
+) %>% select(-MODEL)
+
+### sometimes no model can be fitted (if all ratings are the same) -> these cases are removed here
+regs <- regs[!is.na(regs$DIRECTIONAL_BIAS) & !is.na(regs$BIAS_FORCE) & !is.na(regs$TRUTH_FORCE),]
+
+### merge regression results into main data
+data <- merge(data, regs, by="ID", all.x = TRUE)
+
+```
+
+## Correlations of model parameters with appropriateness ratings
+
+```{r}
+
+cor.test(data$DIRECTIONAL_BIAS, data$RECAP)
+cor.test(data$TRUTH_FORCE, data$RECAP)
+cor.test(data$BIAS_FORCE, data$RECAP)
+
+```

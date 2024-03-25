@@ -1,0 +1,9 @@
+@misc{azevedo_et_al_2022_ICSMP,
+ title={Social and moral psychology of COVID-19 across 69 countries},
+ url={psyarxiv.com/a3562},
+ DOI={10.31234/osf.io/a3562},
+ publisher={PsyArXiv},
+ author={Azevedo, Flavio and Pavlović, Tomislav and Rêgo, Gabriel G D and Ay, F. Ceren and Gjoneska, Biljana and Etienne, Tom and Ross, Robert M and Schönegger, Philipp and Riaño, Julian and Cichocka, Aleksandra and et al.},
+ year={2022},
+ month={May}
+}

@@ -1,0 +1,433 @@
+---
+title: "COVID-19 Leader Perceptions Registered Report (Plots)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: FALSE
+---
+
+<script>
+$(document).ready(function() {
+  $items=$('div#TOC li');
+  $items.each(function(idx) {
+    num_ul=$(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(tidy=FALSE, fig.align='left')
+options(knitr.kable.NA='')
+```
+
+```{r}
+rand_seed=828
+set.seed(rand_seed)
+```
+
+# Setup
+
+## Package Loading
+
+```{r, message=F}
+library(tidyr)
+library(dplyr)
+library(Hmisc)
+library(stringr)
+library(lme4)
+library(lmerTest)
+library(stats)
+library(emmeans)
+library(kableExtra)
+library(ggrepel)
+```
+
+## Plot Setup
+
+```{r}
+colorDic <- c("Non-Utilitarian"='#D98A32', "Utilitarian"='#61AAC5',
+              "Instrumental Harm"='#942193', "Impartial Beneficence"='#019051')
+
+theme_set(theme_test() +
+          theme(legend.position='None',
+                panel.border=element_blank(),
+                plot.title=element_text(hjust=0.5),
+                axis.title=element_text(size=13, face='bold'),
+                axis.title.x=element_text(margin=margin(10, 0, 0, 0)),
+                axis.title.y=element_text(margin=margin(0, 10, 0, 0)),
+                axis.text.x=element_text(size=13),
+                axis.line.y=element_line(color='gray20'),
+                axis.ticks=element_blank(),
+                strip.background=element_blank(),
+                strip.text=element_text(face='bold', size=12),
+                panel.spacing=unit(1, "lines")))
+```
+
+## Data Loading
+
+```{r}
+df <- read.csv("data.csv", header=TRUE, stringsAsFactors=FALSE)
+```
+
+## Set Factor Levels
+
+```{r}
+# Get rid of vars we won't use
+df <- select(df, subId, country, 
+              # Demographics
+              gender_recode, age, education, subj_SES, pol_ideology, religiosity,
+              # Other vars
+              support, check_selfrep, check_voting, taskOrder,
+              # Conditions
+              argument, dimension, dilemma,
+              # DVs
+              avg_trust, behav)
+
+# Set factor levels
+df <- df %>%
+  mutate(dilemma=ifelse(dilemma == "ppe", "PPE", capitalize(dilemma)),
+         dilemma=factor(dilemma, levels=c("Lockdown", "Tracing", "Ventilator", 
+                                              "PPE", "Medicine")))
+
+df <- df %>%
+  mutate(dimension=recode(dimension, "IH"="Instrumental Harm", 
+                            "IB"="Impartial Beneficence") ,
+         dimension=factor(dimension, levels=c("Instrumental Harm", "Impartial Beneficence")))
+
+df <- df %>%
+  mutate(argument=factor(argument, levels=c("Utilitarian", "Non-Utilitarian")))
+```
+
+### Trust task
+
+```{r}
+df_self <- df %>% 
+  # Exclusion criteria 4: missing vars
+  filter(!is.na(avg_trust)) %>% 
+  ungroup() %>%
+  select(-behav) %>%
+  na.omit() %>%
+  # Exclusion criteria 5: failed check
+  filter(check_selfrep == 1) 
+```
+
+`r length(unique(df_self$subId))` subjects in the self-reported trust task
+
+### Behavioral Task
+
+```{r}
+df_beh <- df %>% 
+  # Exclusion criteria 4: missing vars
+  filter(!is.na(behav)) %>% 
+  ungroup() %>%
+  select(-avg_trust) %>%
+  na.omit() %>%
+  # Exclusion criteria 5: failed check
+  filter(check_voting == 1) %>% 
+  # Recode answer
+  mutate(answer_recode=recode(behav, "Utilitarian"=1,
+                                "Non-Utilitarian"=0))
+```
+
+`r length(unique(df_beh$subId))` subjects in the voting task
+
+# Main Models
+
+## By dimension:
+
+### Self Report
+
+```{r}
+df_self %>%
+  ggplot(aes(x=argument, y=avg_trust, 
+             color=argument, fill=argument)) + 
+  geom_boxplot(alpha=.2, size=.5, outlier.shape=NA) +
+  scale_fill_manual(values=colorDic) +
+  scale_color_manual(values=colorDic) +
+  facet_wrap(~dimension) +
+  xlab('Argument') +
+  ylab('Average Trust in Leader') +
+  scale_y_continuous(breaks=seq(1, 7), limits=c(0.5, 7.5)) -> p
+p
+
+ggsave(plot=p, width=6, height=4, device='jpeg',
+       filename="Plots/CLP_RR_SelfRep.jpeg")
+ggsave(plot=p, width=6, height=4, device='pdf',
+       filename="Plots/CLP_RR_SelfRep.pdf")
+```
+
+### Voting
+
+```{r}
+df_beh %>%
+  group_by(dimension) %>%
+  mutate(total=n()) %>%
+  group_by(dimension, behav, total) %>%
+  summarise(counts=n(), .groups = "drop") %>%
+  mutate(perc=counts*100/total,
+         dimension=factor(str_replace(dimension, " ", "\n"),
+                          levels=c("Instrumental\nHarm", "Impartial\nBeneficence")), 
+         lab_ypos=recode(behav, 'Utilitarian'=7, 'Non-Utilitarian'=77),
+         percSE=sqrt(perc*(100-perc)/total)) -> tmp
+
+tmp %>%
+  ggplot(aes(x=dimension, y=perc, fill=behav)) +
+  geom_bar(stat="identity", color='black', width=.7) +
+  geom_errorbar(data=filter(tmp, behav=='Utilitarian'),
+                aes(ymin=perc-percSE, ymax=perc+percSE), width=0.15) +
+  scale_fill_manual(values=colorDic)  +
+  xlab('Dimension') +
+  ylab('% Chosen') +
+  scale_y_continuous(breaks=seq(0, 100, 10), limits=c(0, 100)) +
+  coord_cartesian(clip='off') +
+  geom_hline(yintercept=0, color='gray20') +
+  geom_text(aes(x=1.5, y=Inf, label ="Non-Utilitarian Leader", 
+                 vjust=-1.5, size=4, fontface =2), color=colorDic[1]) +
+  geom_text(aes(x=1.5, y=Inf, label ="Utilitarian Leader", 
+                 vjust=.2, size=4, fontface =2), color=colorDic[2]) +
+  geom_text(aes(y=lab_ypos, label=paste(round(perc, 1), '%', sep='')), 
+            stat="identity", fontface=2,
+            position=position_stack(vjust=1)) +
+  theme(plot.margin=unit(c(25, 5.5, 5.5, 5.5), "points"),
+        axis.ticks.y=element_blank(),
+        axis.text.x=element_text(margin=margin(-5, 0, 0, 0))) -> p
+
+p
+
+ggsave(plot=p, width=3.5, height=5, device='jpeg',
+       filename="Plots/CLP_RR_Voting.jpeg")
+ggsave(plot=p, width=3.5, height=5, device='pdf',
+       filename="Plots/CLP_RR_Voting.pdf")
+```
+
+### Voting Estimates
+
+```{r}
+df_beh_est <- read.csv("ModelEstimates_Voting.csv")
+
+df_beh_est %>%
+  rename('Utilitarian'='prob') %>%
+  mutate(dimension=recode(dimension_recode, `-0.5`="Instrumental\nHarm", 
+                          `0.5`="Impartial\nBeneficence"),
+         dimension=factor(dimension, levels=c("Instrumental\nHarm", "Impartial\nBeneficence")),
+         Utilitarian=Utilitarian*100,
+         asymp.LCL=asymp.LCL*100,
+         asymp.UCL=asymp.UCL*100,
+         `Non-Utilitarian`=100-Utilitarian) %>%
+  gather(behav, perc, -dimension_recode, -c(SE:dimension)) %>%
+  mutate(lab_ypos=recode(behav, 'Utilitarian'=7, 'Non-Utilitarian'=77)) %>%
+  ggplot(aes(x=dimension, y=perc, fill=behav)) +
+  geom_bar(stat="identity", color='black', width=.7) +
+  geom_errorbar(aes(ymin=asymp.LCL, ymax=asymp.UCL), width=0.15) +
+  scale_fill_manual(values=colorDic)  +
+  xlab('Dimension') +
+  ylab('Estimated % Chosen') +
+  scale_y_continuous(breaks=seq(0, 100, 10), limits=c(0, 100)) +
+  coord_cartesian(clip='off') +
+  geom_hline(yintercept=0, color='gray20') +
+  geom_text(aes(x=1.5, y=Inf, label ="Non-Utilitarian Leader", 
+                 vjust=-1.5, size=4, fontface =2), color=colorDic[1]) +
+  geom_text(aes(x=1.5, y=Inf, label ="Utilitarian Leader", 
+                 vjust=.2, size=4, fontface =2),color=colorDic[2]) +
+  geom_text(aes(y=lab_ypos, label=paste(round(perc, 1), '%', sep='')), 
+            stat="identity", fontface=2, 
+            position=position_stack(vjust=1)) +
+  theme(plot.margin=unit(c(25, 5.5, 5.5, 5.5), "points"),
+        axis.ticks.y=element_blank(),
+        axis.text.x=element_text(margin=margin(-5, 0, 0, 0))) -> p
+
+p
+
+ggsave(plot=p, width=3.5, height=5, device='jpeg',
+       filename="Plots/CLP_RR_Voting_Est.jpeg")
+ggsave(plot=p, width=3.5, height=5, device='pdf',
+       filename="Plots/CLP_RR_Voting_Est.pdf")
+```
+
+## By dilemma:
+
+### Self Report
+
+```{r}
+df_self %>%
+  ggplot(aes(x=argument, y=avg_trust, 
+             color=argument, fill=argument)) + 
+  geom_boxplot(alpha=.2, size=.5, outlier.shape=NA) +
+  scale_fill_manual(values=colorDic) +
+  scale_color_manual(values=colorDic) +
+  facet_wrap(~dimension*dilemma, scales='free') +
+  xlab('Argument') +
+  ylab('Average Trust in Leader') +
+  scale_y_continuous(breaks=seq(1, 7), limits=c(0.5, 7.5)) +
+  theme(axis.text.x=element_text(size=10)) -> p
+p
+
+ggsave(plot=p, width=7, height=6, device='jpeg',
+       filename="Plots/CLP_RR_SelfRep_byDil.jpeg")
+ggsave(plot=p, width=7, height=6, device='pdf',
+       filename="Plots/CLP_RR_SelfRep_byDil.pdf")
+```
+
+### Voting
+
+```{r}
+df_beh %>%
+  group_by(dimension, dilemma) %>%
+  mutate(total=n()) %>%
+  group_by(dimension, behav, total, dilemma) %>%
+  summarise(counts=n(), .groups = "drop") %>%
+  mutate(perc=counts*100/total,
+         dimension=factor(str_replace(dimension, " ", "\n"),
+                          levels=c("Instrumental\nHarm", "Impartial\nBeneficence")), 
+            lab_ypos=recode(behav, 'Utilitarian'=7, 'Non-Utilitarian'=77),
+         percSE=sqrt(perc*(100-perc)/total)) -> tmp
+
+tmp %>%
+  ggplot(aes(x=dilemma, y=perc, fill=behav)) +
+  geom_bar(stat="identity", color='black', width=.7) +
+  geom_errorbar(data=filter(tmp, behav=='Utilitarian'),
+                  aes(ymin=perc-percSE, ymax=perc+percSE), width=0.15) +
+  scale_fill_manual(values=colorDic)  +
+  facet_wrap(~dimension, scales='free') +
+  xlab('Dimension') +
+  ylab('% Chosen') +
+  scale_y_continuous(breaks=seq(0, 100, 10), limits=c(0, 100)) +
+  coord_cartesian(clip='off') +
+  geom_hline(yintercept=0, color='gray20') +
+  geom_text(aes(y=lab_ypos, label=paste(round(perc, 1), '%', sep='')), 
+            stat="identity",fontface=2,
+            position=position_stack(vjust=1)) +
+  theme(plot.margin=unit(c(25, 5.5, 5.5, 5.5), "points"),
+        axis.ticks.y=element_blank(),
+        axis.text.x=element_text(margin=margin(-5, 0, 0, 0), size=10)) -> p
+
+p
+
+ggsave(plot=p, width=6, height=5, device='jpeg',
+       filename="Plots/CLP_RR_Voting_byDil.jpeg")
+ggsave(plot=p, width=6, height=5, device='pdf',
+       filename="Plots/CLP_RR_Voting_byDil.pdf")
+```
+
+## By country
+
+### Self Report
+
+```{r}
+df_coeffs_selfrep <- read.csv("CountryCoeffs_SelfRep.csv")
+df_coeffs_selfrep %>%
+  mutate(country=recode(country, "South Korea"="Korea", 
+                      "Kingdom of Saudi Arabia"="KSA",
+                      "The Netherlands"="Netherlands", 
+                      "United Kingdom"="UK", 
+                      "United States"="US", 
+                      "United Arab Emirates"="UAE")) %>%
+  mutate(isoverall=if_else(country=="Overall", 'red', 'black')) %>%
+  arrange(desc(isoverall), as.numeric(argument_recode.dimension_recode)) -> df_coeffs_selfrep
+
+df_coeffs_selfrep %>%
+  mutate(country=factor(country, levels=df_coeffs_selfrep$country)) %>%
+  ggplot(aes(x=argument_recode.dimension_recode, y=country)) + 
+  geom_vline(xintercept=0, lty=2) +
+  geom_linerange(aes(xmin=argument_recode.dimension_recode-argument_recode.dimension_recode_error,
+                     xmax=argument_recode.dimension_recode+argument_recode.dimension_recode_error)) +
+  geom_point(shape=21, size=3, color='black', fill=df_coeffs_selfrep$isoverall) +
+  xlim(-.5, 3.5) +
+  xlab('Effect (Model Coefficient) of Dimension on Trust\nin Utilitarian vs. Non-Utilitarian Leaders') +
+  ylab('Country') +
+  theme(axis.line.y=element_blank(),
+        axis.text.y=element_text(size=13, colour=df_coeffs_selfrep$isoverall)) -> p
+p
+
+ggsave(plot=p, width=7, height=6, device='jpeg',
+      filename="Plots/CLP_RR_SelfRep_byCountry.jpeg")
+ggsave(plot=p, width=7, height=6, device='pdf',
+       filename="Plots/CLP_RR_SelfRep_byCountry.pdf")
+```
+
+```{r}
+df_coeffs_voting <- read.csv("CountryCoeffs_Voting.csv")
+df_coeffs_voting %>%
+  mutate(country=recode(country, "South Korea"="Korea", 
+                      "Kingdom of Saudi Arabia"="KSA",
+                      "The Netherlands"="Netherlands", 
+                      "United Kingdom"="UK", 
+                      "United States"="US", 
+                      "United Arab Emirates"="UAE")) %>%
+  mutate(isoverall=if_else(country=="Overall", 'red', 'black'),
+         dimension_recode_exp=exp(dimension_recode),
+         dimension_recode_exp_upp=exp(dimension_recode+dimension_recode_error),
+         dimension_recode_exp_low=exp(dimension_recode-dimension_recode_error)) %>%
+  arrange(desc(isoverall), as.numeric(dimension_recode)) -> df_coeffs_voting
+
+df_coeffs_voting %>%
+  mutate(country=factor(country, levels=df_coeffs_voting$country)) %>% 
+  ggplot(aes(x=dimension_recode_exp, y=country)) + 
+  geom_vline(xintercept=1, lty=2) +
+  geom_linerange(aes(xmin=dimension_recode_exp_low, 
+                     xmax=dimension_recode_exp_upp)) +
+  geom_point(shape=21, size=3, color='black', fill=df_coeffs_voting$isoverall) +
+  scale_x_continuous(trans='log2') +
+  xlab('Effect (Odds Ratio) of Dimension on Trust\nin Utilitarian vs. Non-Utilitarian Leaders') +
+  ylab('Country') +
+  theme(axis.line.y=element_blank(),
+        axis.text.y=element_text(size=13, colour=df_coeffs_voting$isoverall)) -> p
+p
+
+
+ggsave(plot=p, width=7, height=6, device='jpeg',
+       filename="Plots/CLP_RR_Voting_byCountry.jpeg")
+ggsave(plot=p, width=7, height=6, device='pdf',
+       filename="Plots/CLP_RR_Voting_byCountry.pdf")
+```
+
+### Voting
+
+```{r}
+corrs <- merge(cbind(country=df_coeffs_selfrep$country,
+                     coeffs_selfrep=df_coeffs_selfrep$argument_recode.dimension_recode),
+               cbind(country=df_coeffs_voting$country,
+                     coeffs_voting=df_coeffs_voting$dimension_recode))
+corrs <- filter(corrs, country != "Overall")
+```
+
+```{r}
+corr <- cor.test(as.numeric(corrs$coeffs_selfrep), as.numeric(corrs$coeffs_voting))
+```
+
+Correlation between self-report task and voting task across countries: 
+r=`r round(corr$estimate, 2)`, p=`r round(corr$p.value, 3)`
+
+```{r}
+corrs %>%
+  mutate(coeffs_voting=exp(as.numeric(coeffs_voting)),
+         coeffs_selfrep=as.numeric(coeffs_selfrep)) %>%
+  ggplot(aes(x=coeffs_selfrep, y=coeffs_voting)) + 
+    geom_smooth(method='lm', alpha=.3, color='darkred', formula = 'y ~ x') +
+    geom_point(shape=21, size=3, color='black', fill='black') +
+    scale_y_continuous(trans='log2', breaks=c(2, 3, 5), limits = c(2, 6)) +
+    xlab('Trust in Self Report Task (Model Coefficient)') +
+    ylab('\nVoting in Behavioral Task (Odds Ratio)') +
+    ggtitle('Effect of Dimension on Trust\nin Utilitarian vs. Non-Utilitarian Leaders') +
+    geom_text_repel(label=corrs$country, size=4,
+                    min.segment.length=1,
+                    box.padding=0.35) +
+    coord_cartesian(clip='off') +
+    theme(axis.text.y=element_text(size=13),
+          axis.line.x=element_line(color='gray20'),
+          plot.title=element_text(size=13, face='bold'))  -> p
+p
+
+ggsave(plot=p, width=7, height=6, device='jpeg',
+       filename="Plots/CLP_RR_MeasuresCorr.jpeg")
+ggsave(plot=p, width=7, height=6, device='pdf',
+       filename="Plots/CLP_RR_MeasuresCorr.pdf")
+```

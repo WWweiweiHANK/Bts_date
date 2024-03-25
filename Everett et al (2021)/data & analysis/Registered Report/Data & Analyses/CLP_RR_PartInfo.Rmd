@@ -1,0 +1,413 @@
+---
+title: "COVID-19 Leader Perceptions Registered Report (Participant Info)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: FALSE
+---
+
+<script>
+$(document).ready(function() {
+  $items = $('div#TOC li');
+  $items.each(function(idx) {
+    num_ul = $(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+<style type="text/css">
+.table {
+    width: 80%;
+}
+</style>
+
+# Setup
+
+## Package Loading
+
+```{r, message=F}
+library(dplyr)
+library(tidyr)
+library(mgsub)
+library(kableExtra)
+library(summarytools)
+library(qualtRics)
+library(ggplot2)
+library(psych)
+library(ggcorrplot)
+library(ggforce)
+```
+
+## Plot Setup
+
+```{r}
+theme_set(theme_test() +
+          theme(panel.border = element_blank(),
+                plot.title = element_text(hjust = 0.5),
+                axis.title = element_text(size = 13, face='bold'),
+                axis.title.x = element_text(margin = margin(10, 0, 0, 0)),
+                axis.title.y = element_text(margin = margin(0, 10, 0, 0)),
+                axis.line = element_line(color='gray20'),
+                axis.ticks = element_blank(),
+                strip.background = element_blank(),
+                strip.text = element_text(face = 'bold', size=12),
+                panel.spacing = unit(1, "lines")))
+```
+
+## Data Loading
+
+```{r}
+data_long <- read.csv("data.csv")
+```
+
+# Ns for Exclusions Criteria 4 and 5
+
+### Self Report
+
+```{r}
+df_self <- data_long %>% 
+  select(subId, country, avg_trust, behav,
+         gender_recode, age, education, subj_SES, pol_ideology, religiosity,
+         support, check_selfrep, check_voting, taskOrder,
+         argument, dimension, dilemma) %>%
+  # Exclusion criteria 4: missing vars
+  filter(!is.na(avg_trust)) %>% 
+  ungroup() %>%
+  select(-behav) %>%
+  na.omit() %>%
+  select(subId, dimension, argument, check_selfrep) %>%
+  unique() 
+```
+
+`r length(unique(data_long$subId))-length(unique(df_self$subId))` subjects had missing vars for self report task
+
+`r length(unique(filter(df_self, check_selfrep==0)$subId))` subjects failed self report comp check
+
+```{r}
+df_self %>%
+  group_by(dimension, argument) %>%
+  summarise(failRate = 1-mean(check_selfrep),
+            failRate = round(failRate*100, 2), 
+            .groups ='drop') %>%
+  kable()
+```
+
+```{r}
+df_self <- df_self %>% 
+  # Exclusion criteria 5: failed check
+  filter(check_selfrep == 1) %>% 
+  merge(select(data_long, country, gender_recode, age, subId)) %>%
+  unique()
+```
+
+`r length(unique(df_self$subId))` subjects in the self-reported trust task
+
+```{r}
+df_self %>%
+  group_by(dimension, argument) %>%
+  summarise(counts=n(), .groups ='drop') %>%
+  kable()
+```
+
+### Voting
+
+```{r}
+df_beh <- data_long %>% 
+  select(subId, country, avg_trust, behav,
+         gender_recode, age, education, subj_SES, pol_ideology, religiosity,
+         support, check_selfrep, check_voting, taskOrder,
+         argument, dimension, dilemma) %>%
+  # Exclusion criteria 4: missing vars
+  filter(!is.na(behav)) %>% 
+  ungroup() %>%
+  select(-avg_trust) %>%
+  na.omit() %>%
+  select(subId, dimension, check_voting) %>%
+  unique() 
+```
+
+`r length(unique(data_long$subId))-length(unique(df_beh$subId))` subjects had missing vars for voting task
+
+`r length(unique(filter(df_beh, check_voting==0)$subId))` subjects failed voting comp check
+
+```{r}
+df_beh %>%
+  group_by(dimension) %>%
+  summarise(failRate = 1-mean(check_voting),
+            failRate = round(failRate*100, 2), 
+            .groups ='drop') %>%
+  kable()
+```
+
+```{r}
+df_beh <- df_beh %>% 
+  # Exclusion criteria 5: failed check
+  filter(check_voting == 1) %>% 
+  merge(select(data_long, country, gender_recode, age, subId)) %>%
+  unique()
+```
+
+`r length(unique(df_beh$subId))` subjects in the voting task
+
+```{r}
+df_beh %>%
+  group_by(dimension) %>%
+  summarise(counts=n(), .groups ='drop') %>%
+  kable()
+```
+
+# Ns by Quotas
+
+## Load quotas info
+
+```{r}
+quota_info <- read.csv('quotas.txt', sep='\t', col.names = c("country", 'g_age', 'PercPop'))
+```
+  
+## Formatting
+
+```{r}
+quota_info <- separate(quota_info, g_age, 
+                       into=c('gender_recode', 'age_category'), sep = '_', extra='merge')
+
+quota_info$country <- recode(quota_info$country, 
+                             "U.K." = "UK",
+                             "U.S." = "US")
+
+quota_info %>%
+  group_by(country, age_category) %>%
+  summarise(ExpPercPop = sum(PercPop), .groups ='drop') -> quota_info_age
+
+quota_info %>%
+  group_by(country, gender_recode) %>%
+  summarise(ExpPercPop = sum(PercPop), .groups ='drop') -> quota_info_gender
+
+```
+
+```{r}
+data_long <- mutate(data_long, age_category = case_when(age < 25 ~ "18_24",
+                                    age < 35 ~ "25_34",
+                                    age < 45 ~ "35_44",
+                                    age < 55 ~ "45_54",
+                                    age < 65 ~ "55_64",
+                                    TRUE ~ "over_65"))
+
+data_long$country <- recode(data_long$country, "South Korea"="Korea", 
+                      "Kingdom of Saudi Arabia" = "KSA", 
+                      "The Netherlands" = "Netherlands",
+                      "United Kingdom" = "UK",
+                      "United States" = "US",
+                      "United Arab Emirates" = "UAE")
+```
+   
+## Plots
+
+### Gender
+
+```{r}
+data_long %>%
+  mutate(gender_recode = substr(gender_recode, 1, 1)) %>%
+  filter(gender_recode %in% c("F", "M")) %>%
+  select(country, gender_recode, subId) %>%
+  unique() %>%
+  group_by(country) %>%
+  mutate(CountryTotal = n()) %>%
+  group_by(country, CountryTotal, gender_recode) %>%
+  summarise(countryGenderTotal = n(), .groups ='drop') %>% 
+  left_join(quota_info_gender, by=c("country", "gender_recode")) -> tmp
+
+tmp %>%
+  mutate(gender_recode = case_when(gender_recode=="F" ~ "Women", 
+                                     gender_recode=="M" ~ "Men",
+                                     TRUE ~ as.character(gender_recode)),
+         ExpPercPop = ExpPercPop*CountryTotal) %>%
+  gather(key, value, -country, -gender_recode, -CountryTotal) %>%
+  mutate(key = case_when(key=="countryGenderTotal" ~ "Actual", 
+                         key=="ExpPercPop" ~ "Expected")) %>% 
+  ggplot(aes(x=gender_recode, y=value, color=key, group=key)) +
+  scale_color_manual(values=c('Actual'='black', 'Expected' = '#A4181D')) +
+  geom_point(position = position_dodge(width = .2), alpha=1, size=2) +
+  geom_line(position = position_dodge(width = .2), alpha=1) +
+  theme(axis.title.y.left = element_text(margin = margin(0, 10, 0, 0), color='black'),
+        axis.text.y.left = element_text(color='black'),
+        axis.line.y.left = element_line(color='black')) +
+  xlab('Gender') +
+  scale_y_continuous(expand = c(0, .1), 
+                     limits = c(0, 800),
+                     name = "Number of Participants in Dataset",
+                     sec.axis = sec_axis(trans=~.*100/max(tmp$CountryTotal), name="% of Population")) +
+  theme(axis.title.y.right = element_text(margin = margin(0, 0, 0, 10), color='#A4181D'),
+        axis.text.y.right = element_text(color='#A4181D'),
+        axis.line.y.right = element_line(color='#A4181D'),
+        title = element_text(face = 'bold'),
+        legend.position = 'bottom',
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12)) -> p
+
+for (page in seq(1, 4)) {
+  thisp <- p + facet_wrap_paginate(~country, ncol = 2, nrow = 3, page = page)
+  print(thisp)
+  ggsave(paste('Plots/CLP_RR_Rep_pp', page, '.pdf', sep=''),
+       device = 'pdf', w=5, h=7)
+  ggsave(paste('Plots/CLP_RR_Rep_pp', page, '.jpg', sep=''),
+       device = 'jpg', w=5, h=7)
+}
+```
+
+### Age
+
+```{r}
+data_long %>%
+  select(country, age_category, subId) %>%
+  unique() %>%
+  group_by(country) %>%
+  mutate(CountryTotal = n()) %>%
+  group_by(country, CountryTotal, age_category) %>%
+  summarise(countryAgeTotal = n(), .groups ='drop') %>% 
+  left_join(quota_info_age, by=c("country", "age_category")) -> tmp
+
+tmp %>%
+  mutate(age_category = gsub("_", "-", age_category),
+         ExpPercPop = ExpPercPop*CountryTotal) %>%
+  gather(key, value, -country, -age_category, -CountryTotal) %>%
+  mutate(key = case_when(key=="countryAgeTotal" ~ "Actual", 
+                         key=="ExpPercPop" ~ "Expected")) %>% 
+  ggplot(aes(x=age_category, y=value, color=key, group=key)) +
+  scale_color_manual(values=c('Actual'='black', 'Expected' = '#A4181D')) +
+  geom_point(position = position_dodge(width = .2), alpha=1, size=2) +
+  geom_line(position = position_dodge(width = .2), alpha=1) +
+  theme(axis.title.y.left = element_text(margin = margin(0, 10, 0, 0), color='black'),
+        axis.text.y.left = element_text(color='black'),
+        axis.line.y.left = element_line(color='black')) +
+  xlab('Age Category') +
+  scale_y_continuous(expand = c(0, .1), 
+                     limits = c(-20, 400),
+                     name = "Number of Participants in Dataset",
+                     sec.axis = sec_axis(trans=~.*100/max(tmp$CountryTotal), name="% of Population")) +
+  theme(axis.title.y.right = element_text(margin = margin(0, 0, 0, 10), color='#A4181D'),
+        axis.text.y.right = element_text(color='#A4181D'),
+        axis.line.y.right = element_line(color='#A4181D'),
+        title = element_text(face = 'bold'),
+        legend.position = 'bottom',
+        legend.title = element_blank(),
+        legend.text = element_text(size = 12),
+        axis.text.x = element_text(angle=45, vjust=.5)) -> p
+
+for (page in seq(1, 4)) {
+  thisp <- p + facet_wrap_paginate(~country, ncol = 2, nrow = 3, page = page)
+  print(thisp)
+  ggsave(paste('Plots/CLP_RR_RepAge_pp', page, '.pdf', sep=''),
+       device = 'pdf', w=5, h=7)
+  ggsave(paste('Plots/CLP_RR_RepAge_pp', page, '.jpg', sep=''),
+       device = 'jpg', w=5, h=7)
+}
+```
+
+## Stats
+
+### Gender
+
+```{r}
+data_long %>%
+    select(country, gender_recode, subId) %>%
+    mutate(gender_recode = substr(gender_recode, 1, 1)) %>%
+    filter(gender_recode %in% c("F", "M")) %>%
+    unique() %>%
+    group_by(country) %>%
+    mutate(CountryTotal = n()) %>%
+    group_by(country, CountryTotal, gender_recode) %>%
+    summarise(countryGenderTotal = n(), .groups ='drop') %>% 
+    mutate(ActualPercPop = countryGenderTotal/CountryTotal) %>%
+    left_join(quota_info_gender, by=c("country", "gender_recode")) %>%
+    mutate(extraPerc=ActualPercPop-ExpPercPop,
+         extraN=countryGenderTotal-ExpPercPop*CountryTotal) -> tmp
+
+write.csv(tmp, 'quotas_compare_gender.csv', row.names = F)
+
+kable(head(tmp), digits=2)
+```
+
+```{r}
+tmp %>%
+  filter(abs(extraPerc) >= .05) %>%
+  mutate(represented=paste(gender_recode, if_else(extraPerc>0, "over", "under")),
+         extraPerc=round(extraPerc*100)) %>%
+  select(country, represented, extraPerc) %>%
+  arrange(country) %>%
+  kable()
+```
+
+### Age
+
+```{r}
+data_long %>%
+    select(country, age_category, subId) %>%
+    unique() %>%
+    group_by(country) %>%
+    mutate(CountryTotal = n()) %>%
+    group_by(country, CountryTotal, age_category) %>%
+    summarise(countryAgeTotal = n(), .groups ='drop') %>% 
+    mutate(ActualPercPop = countryAgeTotal/CountryTotal) %>%
+    left_join(quota_info_age, by=c("country", "age_category")) %>%
+    mutate(extraPerc=ActualPercPop-ExpPercPop,
+         extraN=countryAgeTotal-ExpPercPop*CountryTotal) -> tmp
+
+write.csv(tmp, 'quotas_compare_age.csv', row.names = F)
+
+kable(head(tmp), digits=2)
+```
+
+```{r}
+tmp %>%
+  filter(abs(extraPerc) >= .05) %>%
+  mutate(represented=paste(age_category, if_else(extraPerc>0, "over", "under")),
+         extraPerc=round(extraPerc*100),) %>%
+  select(country, represented, extraPerc) %>%
+  arrange(country) %>%
+  kable()
+```
+
+# Demographics
+
+### Gender
+
+```{r}
+df_self %>%
+  select(country, gender_recode, age, subId) %>%
+  unique() %>%
+  group_by(country) %>%
+  mutate(CountryTotal = n(),
+         mean_age = round(mean(age), 2)) %>%
+  group_by(country, CountryTotal, gender_recode, mean_age) %>%
+  summarise(countryGenderTotal = n(), .groups ='drop') %>%
+  spread(gender_recode, countryGenderTotal) -> tmp
+
+write.csv(tmp, 'partInfo_srep.csv', row.names = F)
+
+kable(head(tmp))
+```
+
+### Age
+
+```{r}
+df_beh %>%
+  select(country, gender_recode, age, subId) %>%
+  unique() %>%
+  group_by(country) %>%
+  mutate(CountryTotal = n(),
+         mean_age = round(mean(age), 2)) %>%
+  group_by(country, CountryTotal, gender_recode, mean_age) %>%
+  summarise(countryGenderTotal = n(), .groups ='drop') %>%
+  spread(gender_recode, countryGenderTotal) -> tmp
+
+write.csv(tmp, 'partInfo_voting.csv', row.names = F)
+
+kable(head(tmp))
+```

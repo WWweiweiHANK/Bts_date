@@ -1,0 +1,225 @@
+---
+title: "05 Bayesian Item-based analyses"
+output: html_notebook
+---
+
+This notebook will run the Bayesian Analyses as described in PT preregistration.
+
+First we load the data.
+
+```{r}
+data = read.csv("../output/bayes_data.csv")
+```
+
+```{r}
+head(data)
+```
+Next we prepare the ordered factors
+```{r}
+table(data$Education)
+```
+```{r}
+data$Education = factor(data$Education, levels=c("basic", "vocational",
+                                "undergraduate", "postgraduate"),
+       ordered=TRUE)
+```
+
+```{r}
+table(data$Financial_Situation)
+```
+```{r}
+data$Financial_Situation = factor(data$Financial_Situation, levels=c("much_worse",
+    "little_worse", "unchanged", "little_better", "much_better"),
+       ordered=TRUE)
+```
+
+```{r}
+table(data$Bill_Payments)
+```
+```{r}
+data$Bill_Payments = factor(data$Bill_Payments, levels=c("failed_to_pay",
+    "debt_to_pay", "payed_no_save", "payed_some_save", "payed_spend_free"),
+       ordered=TRUE)
+```
+
+Now we load the bayesian packages (and lme4).
+
+```{r}
+library(lme4)
+library(rstan)
+library(brms)
+```
+
+```{r}
+options(mc.cores = parallel::detectCores())
+rstan_options(auto_write = TRUE)
+```
+
+### Preparing the priors
+
+```{r}
+full_prior = c(prior_string("normal(0, 1)", class = "Intercept"), prior_string("normal(0, 1)", class = "b"), prior_string("exponential(1)",
+            class="sd"))
+```
+
+### Fitting the models
+
+```{r}
+item1_fit = brm(Item_1 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments +
+                  Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior, save_all_pars=T)
+```
+
+
+```{r}
+summary(item1_fit)
+```
+```{r}
+item2_fit = brm(Item_2 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item2_fit)
+```
+```{r}
+item3_fit = brm(Item_3 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments +
+                  Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item3_fit)
+```
+```{r}
+item4_fit = brm(Item_4 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item4_fit)
+```
+```{r}
+item5_fit = brm(Item_5 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item5_fit)
+```
+
+```{r}
+item6_fit = brm(Item_6 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item6_fit)
+```
+
+```{r}
+item7_fit = brm(Item_7 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item7_fit)
+```
+
+```{r}
+item8_fit = brm(Item_8 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item8_fit)
+```
+
+```{r}
+item9_fit = brm(Item_9 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item9_fit)
+```
+
+```{r}
+item10_fit = brm(Item_10 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item10_fit)
+```
+
+```{r}
+item11_fit = brm(Item_11 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item11_fit)
+```
+
+```{r}
+item12_fit = brm(Item_12 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item12_fit)
+```
+
+```{r}
+item13_fit = brm(Item_13 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item13_fit)
+```
+
+```{r}
+item14_fit = brm(Item_14 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item14_fit)
+```
+
+```{r}
+plot(item14_fit)
+```
+```{r}
+item15_fit = brm(Item_15 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item15_fit)
+```
+
+```{r}
+item16_fit = brm(Item_16 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item16_fit)
+```
+
+```{r}
+item17_fit = brm(Item_17 ~ 1 + Men + Z_Age + Z_Income + Education + Bill_Payments + Loss_Awareness + Loss_Intuition + (1|Country), family=bernoulli, data=data, prior=full_prior)
+```
+
+```{r}
+summary(item17_fit)
+```
+
+###Extracting and saving posterior samples
+
+```{r}
+write.csv(posterior_samples(item1_fit), file="../output/bayesian_item_posteriors/item1.csv")
+write.csv(posterior_samples(item2_fit), file="../output/bayesian_item_posteriors/item2.csv")
+write.csv(posterior_samples(item3_fit), file="../output/bayesian_item_posteriors/item3.csv")
+write.csv(posterior_samples(item4_fit), file="../output/bayesian_item_posteriors/item4.csv")
+write.csv(posterior_samples(item5_fit), file="../output/bayesian_item_posteriors/item5.csv")
+write.csv(posterior_samples(item6_fit), file="../output/bayesian_item_posteriors/item6.csv")
+write.csv(posterior_samples(item7_fit), file="../output/bayesian_item_posteriors/item7.csv")
+write.csv(posterior_samples(item8_fit), file="../output/bayesian_item_posteriors/item8.csv")
+write.csv(posterior_samples(item9_fit), file="../output/bayesian_item_posteriors/item9.csv")
+write.csv(posterior_samples(item10_fit), file="../output/bayesian_item_posteriors/item10.csv")
+write.csv(posterior_samples(item11_fit), file="../output/bayesian_item_posteriors/item11.csv")
+write.csv(posterior_samples(item12_fit), file="../output/bayesian_item_posteriors/item12.csv")
+write.csv(posterior_samples(item13_fit), file="../output/bayesian_item_posteriors/item13.csv")
+write.csv(posterior_samples(item14_fit), file="../output/bayesian_item_posteriors/item14.csv")
+write.csv(posterior_samples(item15_fit), file="../output/bayesian_item_posteriors/item15.csv")
+write.csv(posterior_samples(item16_fit), file="../output/bayesian_item_posteriors/item16.csv")
+write.csv(posterior_samples(item17_fit), file="../output/bayesian_item_posteriors/item17.csv")
+```

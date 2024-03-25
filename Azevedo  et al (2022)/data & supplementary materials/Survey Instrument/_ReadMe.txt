@@ -1,0 +1,1 @@
+When translations materials are not in this folder, they were not made available by team-leads, and thus, we cannot share/provide them to you.

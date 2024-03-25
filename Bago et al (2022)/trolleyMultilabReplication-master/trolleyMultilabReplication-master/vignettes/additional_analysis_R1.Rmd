@@ -1,0 +1,234 @@
+---
+title: "manuscript"
+output:
+  pdf_document: default
+vignette: >
+  %\VignetteIndexEntry{manuscript}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+) 
+```
+
+```{r setup, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+set.seed(42)
+
+# Load packages
+devtools::load_all()
+# library(trolleyMultilabReplication)
+library(tidyverse)
+library(kableExtra)
+library(gt)
+library(countrycode)
+
+# Save data for each study separately
+study1a <- dplyr::filter(trolley, include_study1a)
+study1b <- dplyr::filter(trolley, include_study1b)
+study2a <- dplyr::filter(trolley, include_study2a)
+study2b <- dplyr::filter(trolley, include_study2b)
+intention_a <- dplyr::filter(trolley, include_study1a|include_study2a)
+intention_b <- dplyr::filter(trolley, include_study1b|include_study2b)
+
+# Save data but without the familiarity filter for each study
+study1a_nf <- dplyr::filter(trolley, include_study1a_withoutfamiliarity)
+study1b_nf <- dplyr::filter(trolley, include_study1b_withoutfamiliarity)
+study2a_nf <- dplyr::filter(trolley, include_study2a_withoutfamiliarity)
+study2b_nf <- dplyr::filter(trolley, include_study2b_withoutfamiliarity)
+intention_a_nf <- dplyr::filter(trolley, include_study1a_withoutfamiliarity|include_study2a_withoutfamiliarity)
+intention_b_nf <- dplyr::filter(trolley, include_study1b_withoutfamiliarity|include_study2b_withoutfamiliarity)
+
+# Save data but with only those who failed the familiar exclusion criteria
+study1a_f <- dplyr::filter(trolley, include_study1a_familiar)
+study1b_f <- dplyr::filter(trolley, include_study1b_familiar)
+study2a_f <- dplyr::filter(trolley, include_study2a_familiar)
+study2b_f <- dplyr::filter(trolley, include_study2b_familiar)
+
+# Add individualism and collectivism scales
+study2a <- add_ind_col_scale(study2a)
+study2b <- add_ind_col_scale(study2b)
+study2a_nf <- add_ind_col_scale(study2a_nf)
+study2b_nf <- add_ind_col_scale(study2b_nf)
+
+# Add individualism and collectivism scales
+trolley <- add_ind_col_scale(trolley)
+```
+
+
+# 2. Main replication analysis
+## Study 2a and 2b
+
+```{r Study2a intention, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+rscale <-  0.26
+vars1a <- c("trolley_3_rate", "trolley_2_rate")
+
+studys1a_results <- 
+  bind_rows(
+    calculate_intention_stat(intention_a, vars = vars1a, 
+                             label = "Exclusion", rscale = rscale),
+    calculate_intention_stat(intention_a_nf, vars = vars1a, 
+                             label = "Include familiar", rscale = rscale),
+    calculate_intention_stat(trolley, vars = vars1a, 
+                             label = "No exclusion", rscale = rscale)) %>% 
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)))
+
+kbl(
+  studys1a_results,
+  format = "latex",
+  col.names = c("Exclusion", "Cluster", "BF",  "t", "df", "p", "Cohen's d", "Raw effect", "$89\\%$ CI"),
+  booktabs = T,
+  escape = F,
+  caption = "The effect of intention on moral dilemma judgements on Trolley dilemmas",
+  centering = T,
+  position = "H") %>%
+  kable_styling( full_width = F,  position = "left", latex_options = "scale_down") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top", latex_hline = "major", row_group_label_position = "identity")
+```
+
+```{r Study2b intention, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+rscale <-  0.26
+vars1b <- c("speedboat_3_rate", "speedboat_2_rate")
+
+studys1b_results <- 
+  bind_rows(
+    calculate_intention_stat(intention_b, vars = vars1b, 
+                             label = "Exclusion", rscale = rscale),
+    calculate_intention_stat(intention_b_nf, vars = vars1b, 
+                             label = "Include familiar", rscale = rscale),
+    calculate_intention_stat(trolley, vars = vars1b, 
+                             label = "No exclusion", rscale = rscale)) %>% 
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)))
+
+kbl(
+  studys1b_results,
+  format = "latex",
+  col.names = c("Exclusion", "Cluster", "BF",  "t", "df", "p", "Cohen's d", "Raw effect", "$89\\%$ CI"),
+  booktabs = T,
+  escape = F,
+  caption = "The effect of intention on moral dilemma judgements on Speedboat dilemmas",
+  centering = T,
+  position = "H") %>%
+  kable_styling( full_width = F,  position = "left", latex_options = "scale_down") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top", latex_hline = "major", row_group_label_position = "identity")
+```
+
+```{r Study1a Bayesian, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+# Set parameters for analysis
+rscale <- .26
+vars1a <- c("trolley_1_rate", "trolley_2_rate")
+
+# Running the analysis
+studys1a_results <- 
+  bind_rows(
+    calculate_study1_stat(study1a, vars = vars1a, 
+                          label = "Exclusion", rscale = rscale), 
+    calculate_study1_stat(study1a_nf, vars = vars1a, 
+                          label = "Including familiar", rscale = rscale)) %>% 
+  mutate(
+    # RR was calculated by manual iteration
+    RR = c("7.00e-03, 14.00", "<1.00e-05, 2.80e+06", "1.20e-02, 4.30", "1.50e-05, 6.50e+03", "<1.00e-05, 5.50e+11", "<1.00e-05, 2.90e+04"),
+    # Changing the formatting of small p-values
+    p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)), 
+    Dilemma = rep("Trolley", 6))%>%
+  select(Dilemma, everything())
+```
+
+
+```{r Study1b Bayesian, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+rscale <- .26
+vars1b <- c("speedboat_1_rate", "speedboat_2_rate")
+
+studys1b_results <-
+  bind_rows(
+    calculate_study1_stat(study1b, vars = vars1b,
+                          label = "Exclusion", rscale = rscale),
+    calculate_study1_stat(study1b_nf, vars = vars1b,
+                          label = "Including familiar", rscale = rscale)) %>%
+  # RR was calculated by manual iteration
+  mutate(
+    RR = c("1.80e-05, 1.70e+04", "1.30e-03, 74.00", "3.30e-02, 1.20", "6.0e-05, 1.70e+03", "<1.00e-05, 5.5e+05", "<1.00e-05, 4.0e+06"),
+
+    p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)),
+    Dilemma = rep("Speedboat", 6))%>%
+  select(Dilemma, everything())
+
+study1_all = rbind(studys1a_results, studys1b_results)
+
+kbl(
+  study1_all,
+  format = "latex",
+  col.names = c("Dilemma", "Exclusion", "Cluster", "BF", "RR", "t", "df", "p", "Cohen's d", "Raw effect", "$89\\%$ CI"),
+  booktabs = TRUE,
+  escape = F,
+  caption = "The effect of personal force on moral dilemma judgements on Trolley and Speedboat dilemmas",
+  centering = TRUE,
+  position = "H") %>%
+  kable_styling(full_width = FALSE, position = "left", latex_options = "scale_down") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "middle", latex_hline = "major", row_group_label_position = "identity")%>%
+  collapse_rows(columns = 2, valign = "top", latex_hline = "linespace",
+                row_group_label_position = "identity")
+```
+
+
+```{r Study2a Bayesian, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+rscaleFixed <- c("personal_force:intention" = 0.19)
+vars2a <- c("trolley_3_rate", "trolley_4_rate", "trolley_5_rate", "trolley_6_rate")
+
+studys2a_results <-
+  bind_rows(
+    calculate_study2_stat(study2a, vars = vars2a,
+                          label = "Exclusion", rscaleFixed = rscaleFixed),
+    calculate_study2_stat(study2a_nf, vars = vars2a,
+                          label = "Include familiar", rscaleFixed = rscaleFixed)) %>%
+  # RR was calculated by manual iteration
+  mutate(
+    RR = c(c("0.022, 0.64", "0.0275, 0.2", "0.000058, 1.80e+03", "2.50e-02, 1.35", "0.00223, 60", "<1.00e-05, 3700000000")),
+    p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)), 
+    Dilemma = rep("Trolley", 6))%>%
+  select(Dilemma, everything())
+
+```
+
+```{r study2b Bayesian, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+rscaleFixed <- c("personal_force:intention" = 0.19)
+vars2b <- c("speedboat_3_rate", "speedboat_4_rate", "speedboat_5_rate", "speedboat_6_rate")
+
+studys2b_results <-
+  bind_rows(
+    calculate_study2_stat(study2b, vars = vars2b,
+                          label = "Exclusion", rscaleFixed=rscaleFixed),
+    calculate_study2_stat(study2b_nf, vars = vars2b,
+                          label = "Include familiar", rscaleFixed=rscaleFixed)) %>%
+  # RR was calculated by manual iteration
+  mutate(
+    RR = c("0.046, 0.69", "5.10e-02, 0.65", "3.60e-02, 1.15", "0.045, 0.6", "0.032, 0.94", "0.0006, 75"),
+    p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)),
+    Dilemma = rep("Speedboat", 6))%>%
+  select(Dilemma, everything())
+
+study2_all = rbind(studys2a_results, studys2b_results)
+
+kbl(
+  study2_all,
+  format = "latex",
+  col.names = c("Dilemma", "Exclusion", "Cluster", "BF", "RR", "b", "$89\\%$ CI", "p", 'Partial $\\eta^2$', "Raw effect"),
+  booktabs = T,
+  escape = F,
+  caption = "Do personal force interact with intention on Speedboat and Trolley dilemmas?",
+  centering = T,
+  position = "H") %>%
+  kable_styling(full_width = F,  position="left", latex_options = "scale_down") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "middle", latex_hline = "major", row_group_label_position = "identity")%>%
+  collapse_rows(columns = 2, valign = "top", latex_hline = "linespace",
+                row_group_label_position = "identity")
+
+```
+

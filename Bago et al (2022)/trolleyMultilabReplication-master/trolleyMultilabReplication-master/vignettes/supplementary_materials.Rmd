@@ -1,0 +1,714 @@
+---
+title: Supplementary Analysis
+output: 
+  rmarkdown::pdf_document:
+    extra_dependencies: ["float"] 
+    fig_caption: yes
+geometry: "left=2cm,right=2cm,top=1cm,bottom=1.8cm"
+
+
+
+    
+header-includes: 
+  \usepackage{float}
+  \floatplacement{figure}{H} 
+  \newcommand{\beginsupplement}{\setcounter{table}{0}  \renewcommand{\thetable}{S\arabic{table}} \setcounter{figure}{0} \renewcommand{\thefigure}{S\arabic{figure}}}
+  \pagenumbering{gobble}
+
+
+editor_options: 
+  chunk_output_type: console
+vignette: >
+  %\VignetteIndexEntry{supplementary_materials}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+---
+
+\beginsupplement
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup,  echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+# Load packages
+set.seed(42)
+library(trolleyMultilabReplication)
+library(tidyverse)
+library(kableExtra)
+library(gt)
+library(countrycode)
+
+# Read raw data
+trolley_raw <- read_csv(system.file("extdata/trolley_raw.csv", package = "trolleyMultilabReplication"), guess_max = 10000)
+
+# Prepare datafiles for the analysis
+# Save data for each study separately
+study1a <- filter(trolley, include_study1a)
+study1b <- filter(trolley, include_study1b)
+study2a <- filter(trolley, include_study2a)
+study2b <- filter(trolley, include_study2b)
+
+# Save data but wihtouth the familiarity filter for each study
+study1a_nf <- filter(trolley, include_study1a_withoutfamiliarity)
+study1b_nf <- filter(trolley, include_study1b_withoutfamiliarity)
+study2a_nf <- filter(trolley, include_study2a_withoutfamiliarity)
+study2b_nf <- filter(trolley, include_study2b_withoutfamiliarity)
+
+# Save data but with only those who failed the familiar exclusion criteria
+study1a_f <- dplyr::filter(trolley, include_study1a_familiar)
+study1b_f <- dplyr::filter(trolley, include_study1b_familiar)
+study2a_f <- dplyr::filter(trolley, include_study2a_familiar)
+study2b_f <- dplyr::filter(trolley, include_study2b_familiar)
+
+# Add individualism and collectivism scales
+study2a <- add_ind_col_scale(study2a)
+study2b <- add_ind_col_scale(study2b)
+study2a_nf <- add_ind_col_scale(study2a_nf)
+study2b_nf <- add_ind_col_scale(study2b_nf)
+
+###contact
+intention_a_nf <- dplyr::filter(trolley, include_study1a_withoutfamiliarity|include_study2a_withoutfamiliarity)
+intention_b_nf <- dplyr::filter(trolley, include_study1b_withoutfamiliarity|include_study2b_withoutfamiliarity)
+intention_a <- dplyr::filter(trolley, include_study1a|include_study2a)
+intention_b <- dplyr::filter(trolley, include_study1b|include_study2b)
+
+# Add individualism and collectivism scales
+trolley <- add_ind_col_scale(trolley)
+```
+
+```{r background information, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE, eval = FALSE}
+# Calculate background information
+# Check if GBR001 is in the processed data
+trolley %>%
+  distinct(survey_name, lab)
+
+# Show the labs who are in the raw dataset but not in the processed
+# Most likely these labs sent out the survey with the practice link
+missing_labs <-
+ trolley_raw %>%
+ distinct(lab) %>%
+ anti_join(., distinct(trolley_preprocessed, lab), by = "lab")
+
+# Show the number of participants missing in each lab
+trolley_raw %>%
+ inner_join(., missing_labs, by = "lab") %>%
+ count(lab) %>%
+ ungroup() %>%
+ mutate(all_n = sum(n))
+
+# Show the number of participants excluded because of not finished responses
+trolley_raw %>%
+ dplyr::filter(str_detect(str_to_lower(practice), "false")) %>%
+ dplyr::filter(!(lab == "TUR_021" & StartDate < lubridate::date("2020-04-22")),
+        !(lab == "AUT_003" & StartDate < lubridate::date("2020-06-18")),
+        !(lab == "USA_095")) %>%
+ dplyr::filter(Progress < 98) %>%
+ count()
+
+# Show the number of labs
+trolley %>%
+  distinct(lab) %>%
+  count()
+
+trolley_raw %>%
+  distinct(lab) %>%
+  count()
+
+# Number of responses
+nrow(trolley)
+nrow(trolley_raw)
+
+# Number of languages
+trolley_raw %>%
+  distinct(Q_Lang) %>%
+  drop_na(Q_Lang) %>%
+  count()
+```
+
+
+# 1. Demographics 
+\newpage
+
+```{r dem2,echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+#\vspace{-8truemm}
+
+summaries <-
+  trolley %>%
+  tidyr::nest(data = dplyr::everything()) %>%
+  dplyr::mutate(
+    country_sum = purrr::map(data,
+                             . %>%
+                               dplyr::group_by(Region, country3) %>%
+                               summarise_study() %>%
+                               left_join(cultural_distance, by = "country3") %>%
+                               add_column(grouping = "By country", .before = 1) %>%
+                               mutate(Country = countrycode::countrycode(
+                                 sourcevar = country3,
+                                 origin = "iso3c",
+                                 destination = "country.name")) %>%
+                               arrange(Region, Country)),
+    region_sum = map(data,
+                     . %>%
+                       group_by(Region) %>%
+                       summarise_study() %>%
+                       add_column(grouping = "By region", .before = 1) %>%
+                       arrange(Region)),
+    all_sum = map(data,
+                  . %>%
+                    summarise_study() %>%
+                    add_column(grouping = "All", .before = 1) %>%
+                    mutate(Region = "All")),
+    # Add the 3 level summaries into one dateset
+    bind_sum = pmap(list(country_sum, region_sum, all_sum), bind_rows))
+
+demo_table <-
+  summaries %>%
+  select(bind_sum) %>%
+  unnest(bind_sum) %>%
+  relocate(Country, .before = country3) %>%
+  select(-country3, -distance_year) %>%
+  gt(groupname_col = "grouping",
+     rowname_col = "Region") %>%
+  fmt_number(columns = c(`Age Mean`, `Age SD`),
+             decimals = 1) %>%
+  cols_merge(columns = c(`Age Mean`, `Age SD`),
+             pattern = "{1} ({2})") %>%
+  fmt_number(columns = c(Collectivism),
+             decimals = 3) %>%
+  fmt_percent(columns = c(`Male %`, `Higher education %`),
+              decimals = 1) %>%
+  fmt_missing(
+    c(Country, Collectivism,
+      Region, grouping, `Higher education %`,
+      `Male %`, `Age SD`)) %>%
+  gt::tab_header(title = " ", subtitle = "Table S1. Demographic description of the sample by country.")%>%
+  gt::cols_label(`Age Mean` = "Age (SD)") %>%
+  gt::tab_footnote(
+    footnote = "Distance from the US in collectivism. Some countries do not have a collectivism score.",
+    locations = cells_column_labels(columns = c(Collectivism))) %>%
+  gt::tab_options(
+    table.font.size = 10,
+    # row_group.font.size = 7,
+    # column_labels.font.size = 7,
+    row.striping.include_table_body = TRUE,
+    row.striping.background_color = "#EEEEEE",
+    row.striping.include_stub = TRUE,
+    row_group.background.color = "#999999",
+    column_labels.background.color = "#999999",
+    data_row.padding = px(1))
+
+demo_table
+```
+
+
+#2. Additional analysis
+##2.1 Effect of physical contact 
+
+In sum, when assassing the effect of physical force, we found inconclusive evidence for the effect of physical contact, regardless of dilemma type (trolley/speedboat). The summary of the results can be found in the tables below.
+
+```{r physical contact , echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+#Comparing standard footbridge with footbridge pole in every cluster
+rscale <-  0.26
+vars1a <- c("trolley_1_rate", "trolley_4_rate")
+
+studys1a_results <-
+  bind_rows(
+    calculate_contact_stat(intention_a, vars = vars1a,
+                           label = "Exclusion", rscale = rscale),
+    calculate_contact_stat(intention_a_nf, vars = vars1a,
+                           label = "Include familiar", rscale = rscale)) %>%
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)))
+
+kbl(
+  studys1a_results,
+  format = "latex",
+  col.names = c("Exclusion", "Cluster", "BF",  "t", "df", "p", "Cohen's d", "Raw effect", "$89\\%$ CI"),
+  booktabs = T,
+  escape = F,
+  caption = "Table S2. The effect of phyisical contact on moral dilemma judgements on Trolley dilemmas",
+  centering = T,
+  position = "H") %>%
+  kable_styling( full_width = F,  position = "left", latex_options = "scale_down") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top", latex_hline = "major", row_group_label_position = "identity")
+```
+
+
+##2.2 Comparing the standard switch and standard footbridge dilemmas
+
+When comparing the standard switch and standard footbridge dilemmas in all clusters for the trolley and the speedboat tasks we found evidence for a difference between the two dilemmas in moral acceptability ratings. The summary results of each comparison separately can be found in Tables below.
+
+```{r, standard switch and footbridge, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+additional_trolley <-
+  trolley %>%
+  filter(include_study1a | include_study2a) %>%
+  select(survey_name, survey_id, matches("trolley_[0-9]_rate")) %>%
+  pivot_longer(matches("_rate"), names_to = "task", names_pattern = "(.*)_rate", values_to = "rate") %>%
+  mutate(comparison = case_when(task %in% c("trolley_3", "trolley_4") ~ "trolley_standard",
+                                TRUE ~ NA_character_)) %>%
+  calculate_additional_table(.)
+
+additional_speedboat <-
+  trolley %>%
+  filter(include_study1b | include_study2b) %>%
+  select(survey_name, survey_id, matches("speedboat_[0-9]_rate")) %>%
+  pivot_longer(matches("_rate"), names_to = "task", names_pattern = "(.*)_rate", values_to = "rate") %>%
+  mutate(comparison = case_when(task %in% c("speedboat_3", "speedboat_4") ~ "speedboat_standard",
+                                TRUE ~ NA_character_)) %>%
+  calculate_additional_table(.)
+
+bind_rows(additional_trolley, additional_speedboat) %>%
+  filter(str_detect(comparison, "standard")) %>%
+  separate(comparison, into = c("Dilemma", "Comparison"), sep = "_") %>%
+  transmute(Dilemma = str_to_title(Dilemma),
+            Cluster = str_remove(survey_name, "^[^_]*_"),
+            t,
+            `Bf` = scales::scientific(bf),
+            df,
+            p = as.character(p),
+            p = if_else(as.numeric(p) < .001, "< .001", p)) %>%
+  kbl(
+    caption = "Table S3. Comparing the Standard Switch and Standard Footbridge Dilemmas (all exclusion applied).",
+    escape = TRUE,
+    format = "latex",
+    booktabs = T,
+    position= "H") %>%
+  kable_styling(full_width = F,  position = "left") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top", latex_hline = "major", row_group_label_position = "identity")
+```
+
+```{r switch vs footbridge no familiarity, echo = FALSE, message=FALSE, warning=FALSE, paged.print=FALSE}
+#Additional analysis after all exclusions
+additional_trolley <-
+  trolley %>%
+  filter(include_study1a_withoutfamiliarity | include_study2a_withoutfamiliarity) %>%
+  select(survey_name, survey_id, matches("trolley_[0-9]_rate")) %>%
+  pivot_longer(matches("_rate"), names_to = "task", names_pattern = "(.*)_rate", values_to = "rate") %>%
+  mutate(comparison = case_when(task %in% c("trolley_3", "trolley_4") ~ "trolley_standard",
+                                TRUE ~ NA_character_)) %>%
+  calculate_additional_table(.)
+
+additional_speedboat <-
+  trolley %>%
+  filter(include_study1b_withoutfamiliarity | include_study2b_withoutfamiliarity) %>%
+  select(survey_name, survey_id, matches("speedboat_[0-9]_rate")) %>%
+  pivot_longer(matches("_rate"), names_to = "task", names_pattern = "(.*)_rate", values_to = "rate") %>%
+  mutate(comparison = case_when(task %in% c("speedboat_3", "speedboat_4") ~ "speedboat_standard",
+                                TRUE ~ NA_character_)) %>%
+  calculate_additional_table(.)
+
+bind_rows(additional_trolley, additional_speedboat) %>%
+  filter(str_detect(comparison, "standard")) %>%
+  separate(comparison, into = c("Dilemma", "Comparison"), sep = "_") %>%
+  transmute(Dilemma = str_to_title(Dilemma),
+            Cluster = str_remove(survey_name, "^[^_]*_"),
+            t,
+            `Bf` = scales::scientific(bf),
+            df,
+            p = as.character(p),
+            p = if_else(as.numeric(p) < .001, "< .001", p)) %>%
+  kbl(
+    caption = "Table S4. Comparing the Standard Switch and Standard Footbridge Dilemmas (familiarity exclusion not applied)",
+    escape = TRUE,
+    format = "latex",
+    booktabs = T,
+    position= "H") %>%
+  kable_styling(full_width = F,  position = "left") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top", latex_hline = "major", row_group_label_position = "identity")
+```
+
+
+##2.3 Analysing familiar participants
+
+As we registered, we conducted the analysis on familiar participants, the results can be found below.
+
+```{r Study1ab Bayesian, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+rscale <- .26
+vars1a <- c("trolley_1_rate", "trolley_2_rate")
+vars1b <- c("speedboat_1_rate", "speedboat_2_rate")
+
+studys1a_results <-
+  bind_rows(
+    calculate_study1_stat(study1a_f, vars = vars1a,
+                          label = "Trolley", rscale = rscale),
+    calculate_study1_stat(study1b_f, vars = vars1b,
+                          label = "Speedboat", rscale = rscale)) %>%
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)))
+
+studys1a_results <- studys1a_results[, -4]
+
+kbl(
+  studys1a_results,
+  col.names = c("Dilemma", "Cluster", "BF", "t", "df", "p", "Cohen's d", "Raw effect", "$89\\%$ CI"),
+  format = "latex",
+  booktabs = T,
+  escape = F,
+  caption = "Table S5. The effect of personal force on moral dilemma judgements (familiar participants).",
+  centering = T,
+  position = "H") %>%
+  kable_styling(full_width = F,  position = "left") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top", latex_hline = "major", row_group_label_position = "identity")
+```
+
+```{r Study2ab Bayesian, echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+rscaleFixed <- c("personal_force:intention" = 0.19)
+vars2a <- c("trolley_3_rate", "trolley_4_rate", "trolley_5_rate", "trolley_6_rate")
+vars2b <- c("speedboat_3_rate", "speedboat_4_rate", "speedboat_5_rate", "speedboat_6_rate")
+
+studys2a_results <-
+  bind_rows(
+    calculate_study2_stat(study2a_f, vars = vars2a,
+                          label = "Trolley", rscaleFixed = rscaleFixed),
+    calculate_study2_stat(study2b_f, vars = vars2b,
+                          label = "Speedboat", rscaleFixed = rscaleFixed)) %>%
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)))
+
+studys2a_results <- studys2a_results[, -(4)]
+
+kbl(
+  studys2a_results,
+  col.names = c("Dilemma", "Cluster", "BF", "F", "df", "p", 'Partial $\\eta^2$', "Raw effect"),
+  format = "latex",
+  booktabs = T,
+  escape = F,
+  caption = "Table S6. The interaction of personal force and intention on moral dilemma judgemnts (familiar participants).",
+  centering = T,
+  position = "H") %>%
+  kable_styling(full_width = F,  position = "left") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top", latex_hline = "major", row_group_label_position = "identity")
+```
+
+
+##2.4 Oxford utilitarianism Scale
+
+As we registered, we first plot statistics of the Oxford Utilitarianism Scale in each cultural clusters. We applied no exclusion criteria during this analysis. Note however, that due to a technical mistake, some hungarian participants did not see one of the items in the OUS, hence, they were excluded from this analysis.
+
+```{r, fig.pos = "H" ,out.width = "100%", fig.cap = "Results on the Oxford Utilitarianism Scale by regions. The X axis shows the two subscales, while the Y axis shows the ratings. The center of the boxplots are the median, while the lower bound corresponds to the first quartiles (25th percentile), and the upper bound corresponds to the third quartile (75th percentile). The lower whisker represents the minimum value at no more than 1.5 times the inter quartile range from the lower bound, while the upper whisker respresents the maximum value at no further than 1.5 times the inter quartile range fro the upper bound.",echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE }
+# Prepare data for plotting
+plot_data <-
+  trolley %>%
+  filter(!(lab=="HUN_001" & as.Date(StartDate) < as.Date("2020-09-01")))%>%
+  select(survey_name, lab, ResponseId, contains("oxford_")) %>%
+  pivot_longer(
+    contains("oxford_"),
+    names_to = "item_no",
+    values_to = "rate",
+    names_prefix = "oxford_utilitarian_") %>%
+  mutate(item_no = as.integer(item_no),
+         subscale = case_when(item_no == 1L ~ "Impartial\nBeneficence",
+                              item_no == 2L ~ "Instrumental\nHarm",
+                              item_no == 3L ~ "Impartial\nBeneficence",
+                              item_no == 4L ~ "Instrumental\nHarm",
+                              item_no == 5L ~ "Impartial\nBeneficence",
+                              item_no == 6L ~ "Instrumental\nHarm",
+                              item_no == 7L ~ "Impartial\nBeneficence",
+                              item_no == 8L ~ "Instrumental\nHarm",
+                              item_no == 9L ~ "Impartial\nBeneficence",
+                              TRUE ~ NA_character_),
+         survey_name = str_remove(survey_name, "PSA006_")) %>% 
+  drop_na(rate)
+
+# Create plot
+plot_data %>% 
+  ggplot() +
+  aes(
+    x = subscale,
+    y = rate,
+    width = 0.7) +
+  geom_boxplot() +
+  facet_wrap(facets = vars(survey_name)) +
+  labs(
+    y = "Rating",
+    x = "Subscale") +
+  scale_y_continuous(
+    breaks = 1:7,
+    labels = as.character(1:7)) + 
+  theme_bw() +
+  theme(
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.title = element_text(hjust = 0.5, vjust = 0.5, face = "bold", size = 17),
+    axis.title.x = element_blank(),
+    axis.title.y = element_text(face = "bold", size = 15),
+    axis.text.x = element_text(face = "bold", size = 10, colour = "Black"),
+    axis.text.y = element_text(face = "bold", size = 12, colour = "Black"),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 9))
+
+# Save plot
+ggplot2::ggsave("figures/figs1.pdf", device = "pdf", plot = ggplot2::last_plot(), dpi = 300)
+```
+
+As registered, we also report means and confidence intervals for each cultural cluster and each subscale of the Oxford Utilitarianism Scale.
+
+```{r OUS means + CI, echo = FALSE, message=FALSE, warning=FALSE, paged.print=FALSE }
+# Prepare data for plotting
+oxford_data <-
+  trolley %>%
+  filter(!(lab=="HUN_001" & as.Date(StartDate) < as.Date("2020-09-01")))%>%
+  mutate(trolley_response = case_when(!is.na(trolley_1_rate) ~ trolley_1_rate,
+                                      !is.na(trolley_2_rate) ~ trolley_2_rate,
+                                      !is.na(trolley_3_rate) ~ trolley_3_rate,
+                                      !is.na(trolley_4_rate) ~ trolley_4_rate,
+                                      !is.na(trolley_5_rate) ~ trolley_5_rate,
+                                      !is.na(trolley_6_rate) ~ trolley_6_rate),
+         speedboat_response = case_when(!is.na(speedboat_1_rate) ~ speedboat_1_rate,
+                                      !is.na(speedboat_2_rate) ~ speedboat_2_rate,
+                                      !is.na(speedboat_3_rate) ~ speedboat_3_rate,
+                                      !is.na(speedboat_4_rate) ~ speedboat_4_rate,
+                                      !is.na(speedboat_5_rate) ~ speedboat_5_rate,
+                                      !is.na(speedboat_6_rate) ~ speedboat_6_rate),
+         instrumental_harm = rowMeans(subset(., select=c("oxford_utilitarian_2", "oxford_utilitarian_4", "oxford_utilitarian_6", "oxford_utilitarian_8")),na.rm=T),
+         impartial_beneficence = rowMeans(subset(., select=c("oxford_utilitarian_1", "oxford_utilitarian_3", "oxford_utilitarian_5", "oxford_utilitarian_7", "oxford_utilitarian_9"))))
+
+meansCI <- data.frame()
+t <- 1
+for (i in levels(factor(oxford_data$Region))) {
+  meansCI[t,"cluster"]=i
+  k = Rmisc::CI(na.omit(oxford_data[oxford_data$Region==i,]$instrumental_harm))
+  meansCI[t,"mean_ih"] = unname(k[2])
+  meansCI[t,"CI_ih"] = paste0("[",round(unname(k[1]),2), ",", round(unname(k[3]),2), "]")
+  k = Rmisc::CI(na.omit(oxford_data[oxford_data$Region==i,]$impartial_beneficence))
+  meansCI[t,"mean_ib"] = unname(k[2])
+  meansCI[t,"CI_ib"] = paste0("[",round(unname(k[1]),2), ",", round(unname(k[3]),2), "]")
+  t=t+1
+  }
+
+kbl(
+  meansCI,
+  caption = "Table S7. Means and confidence intervals of the Oxford Utilitarianism Scale.)",
+  col.names = c("Cluster", "Mean",  "$95\\%$ CI", "Mean", "$95\\%$ CI"),
+  escape = F,
+  format = "latex",
+  booktabs = T,
+  position= "H") %>%
+  kable_styling(full_width = F,  position = "left") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  add_header_above(c(" " = 1, "Instrumental Harm" = 2, "Impartial Beneficence" = 2))
+```
+
+We also reported correlations between each Oxford Utilitarianism Scale subscales and moral acceptability ratings on each moral dilemma. Results suggests a higher correlation between acceptability ratings and the Instrumental Harm scale, anda somewhat lower correlation between Impartial Beneficence and acceptability ratings.
+
+```{r OUS correlations, echo = FALSE, message=FALSE, warning = FALSE, paged.print = FALSE}
+#Prepare data for plotting
+final <- bind_rows(
+  oxford_data %>%
+    tibble::as_tibble() %>%
+    dplyr::group_by(Region) %>%
+    tidyr::nest() %>%
+    dplyr::arrange(Region) %>%
+    dplyr::mutate(data = purrr::map(data,
+                                    ~as.data.frame(.x)),
+                  cortest_instrumental_t = purrr::map(data,
+                              ~cor.test(~trolley_response + instrumental_harm, data = .x) %>%
+                                        broom::tidy()),
+                  cortest_impartial_t = purrr::map(data,
+                              ~cor.test(~trolley_response + impartial_beneficence, data = .x) %>%
+                                        broom::tidy())) %>%
+    dplyr::ungroup() %>%
+    dplyr::transmute(
+      label="Trolley",
+      Cluster = Region,
+      r = purrr::map_dbl(cortest_instrumental_t,
+                         ~dplyr::pull(.x, estimate) %>%
+                           round(2)),
+      p = purrr::map_chr(cortest_instrumental_t,
+                         ~dplyr::pull(.x, p.value) %>%
+                           round(3)),
+      r2 = purrr::map_dbl(cortest_impartial_t,
+                         ~dplyr::pull(.x, estimate) %>%
+                           round(2)),
+      p2 = purrr::map_chr(cortest_impartial_t,
+                         ~dplyr::pull(.x, p.value) %>%
+                           round(3)),
+      df = purrr::map_chr(cortest_instrumental_t,
+                         ~dplyr::pull(.x, parameter))),
+    oxford_data %>%
+    tibble::as_tibble() %>%
+    dplyr::group_by(Region) %>%
+    tidyr::nest() %>%
+    dplyr::arrange(Region) %>%
+    dplyr::mutate(data = purrr::map(data,
+                                    ~as.data.frame(.x)),
+                  cortest_instrumental_t = purrr::map(data,
+                              ~cor.test(~speedboat_response+instrumental_harm, data = .x) %>%
+                                        broom::tidy()),
+                  cortest_impartial_t = purrr::map(data,
+                              ~cor.test(~speedboat_response+impartial_beneficence, data = .x) %>%
+                                        broom::tidy()))%>%
+    dplyr::ungroup() %>%
+    dplyr::transmute(
+      label="Speedboat",
+      Cluster = Region,
+      r = purrr::map_dbl(cortest_instrumental_t,
+                         ~dplyr::pull(.x, estimate) %>%
+                           round(2)),
+      p = purrr::map_chr(cortest_instrumental_t,
+                         ~dplyr::pull(.x, p.value) %>%
+                           round(3)),
+      r2 = purrr::map_dbl(cortest_impartial_t,
+                         ~dplyr::pull(.x, estimate) %>%
+                           round(2)),
+      p2 = purrr::map_chr(cortest_impartial_t,
+                         ~dplyr::pull(.x, p.value) %>%
+                           round(3)),
+      df = purrr::map_chr(cortest_impartial_t,
+                         ~dplyr::pull(.x, parameter)))) %>%
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)),
+         p2 = ifelse(as.numeric(p2) < .001, "<.001", round(as.numeric(p2),3)))
+
+kbl(
+  final,
+  caption = "Table S8. Correlational analysis of the Oxford Utilitarianism Scale subscales with moral accaptability ratings on moral dilemmas.)",
+  col.names = c("Dilemma", "Cluster", "r",  "p", "r", "p", "df"),
+  escape = TRUE,
+  format = "latex",
+  booktabs = T,
+  position= "H") %>%
+  kable_styling(full_width = F,  position = "left") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  collapse_rows(columns = 1, valign = "top", latex_hline = "major", row_group_label_position = "identity") %>%
+  add_header_above(c(" " = 1, "Impartial Beneficence" = 2, "Instrumental Harm" = 2, " " = 1))
+```
+
+
+#3. Exploratory analysis on overall utilitarianism and collectivism
+
+Although not part of the planned analysis, we hypothesized that country-level collectivism would be negatively associated with utilitarian responding (i.e., higher morall acceptibility ratings). We found no evidence for this hypothesis, regardless of familiarity exclusion or dilemma context. Interestingly, however, we found strong evidence for the association between vertical individualism and average moral acceptibility ratings on moral dilemmas, regardless of dilemma context or exclusion criteria. The positive association means that higher levels of vertical individualism is associated with higher acceptance of the utilitarian response option. Although we hypothesized that it would be collectivism that makes people *more* emotional and therefore, less utilitarian, we speculate that individualism made people *less* emotional and therefore, more utilitarian.
+
+In all of the regression models below, we added the random intercept of countries.
+
+```{r analysis individual + country level study 2a, echo = FALSE,message = FALSE, warning = FALSE, paged.print = FALSE}
+utilitarian_trolley <- filter(trolley, include_study1a | include_study2a)
+utilitarian_trolley_nf <- filter(trolley, include_study1a_withoutfamiliarity | include_study2a_withoutfamiliarity)
+
+tabledata_sa_ind <-
+  utilitarian_trolley %>%
+  left_join(., cultural_distance, by = "country3") %>%
+  calculate_culture_utilitarianism(study_type = "trolley")
+
+tabledata_sa_ind_tidy <-
+  tidy_culture_utilitarianism(tabledata_sa_ind) %>%
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)),
+         BF = signif(BF, 2))
+
+tabledata_sa_ind_f <-
+  utilitarian_trolley_nf %>%
+  left_join(., cultural_distance, by = "country3") %>%
+  calculate_culture_utilitarianism(study_type = "trolley")
+
+tabledata_sa_ind_f_tidy <-
+  tidy_culture_utilitarianism(tabledata_sa_ind_f) %>%
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)),
+         BF = signif(BF, 2))
+
+full_table_trolley <- merge(tabledata_sa_ind_tidy, tabledata_sa_ind_f_tidy, by="variable")
+full_table_trolley <- full_table_trolley[, -c(4,5,9,10)]
+
+kbl(
+  full_table_trolley,
+  format = "latex",
+  col.names = c("Variable", "BF", "b", "p", "BF", "b", "p"),
+  booktabs = TRUE,
+  escape = TRUE,
+  caption = "Table S9. Is the interaction of personal force and intention affected by individualism/collectivism on Trolley dilemmas?",
+  centering = TRUE,
+  position = "H") %>%
+  kable_styling(full_width = FALSE,  position = "left") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  add_header_above(c(" " = 1, "With familiarity exclusion" = 3, "No familiarity exclusion" = 3))
+```
+
+```{r analysis individual + country level study 2b, echo = FALSE,message = FALSE, warning = FALSE, paged.print = FALSE}
+utilitarian_speedboat <- filter(trolley, include_study1b | include_study2b)
+utilitarian_speedboat_nf <- filter(trolley, include_study1b_withoutfamiliarity | include_study2b_withoutfamiliarity)
+
+tabledata_sb_ind <-
+  utilitarian_speedboat %>%
+  left_join(., cultural_distance, by = "country3") %>%
+  calculate_culture_utilitarianism(study_type = "speedboat")
+
+tabledata_sb_ind_tidy <-
+  tidy_culture_utilitarianism(tabledata_sb_ind) %>%
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)),
+         BF = signif(BF, 2))
+
+tabledata_sb_ind_f <-
+  utilitarian_speedboat_nf %>%
+  left_join(., cultural_distance, by = "country3") %>%
+  calculate_culture_utilitarianism(study_type = "speedboat")
+
+tabledata_sb_ind_f_tidy <-
+  tidy_culture_utilitarianism(tabledata_sb_ind_f) %>%
+  mutate(p = ifelse(as.numeric(p) < .001, "<.001", round(as.numeric(p),3)),
+         BF = signif(BF, 2))
+
+full_table_trolley <- merge(tabledata_sb_ind_tidy, tabledata_sb_ind_f_tidy, by = "variable")
+full_table_trolley <- full_table_trolley[, -c(4,5,9,10)]
+
+kbl(
+  full_table_trolley,
+  format = "latex",
+  col.names = c("Variable", "BF", "b", "p", "BF", "b", "p"),
+  booktabs = TRUE,
+  escape = TRUE,
+  caption = "Table S10. Is the interaction of personal force and intention affected by individualism/collectivism on Speedboat dilemmas?",
+  centering = TRUE,
+  position = "H") %>%
+  kable_styling(full_width = FALSE,  position = "left") %>%
+  row_spec(row = 0, bold = TRUE) %>%
+  add_header_above(c(" " = 1, "With familiarity exclusion" = 3, "No familiarity exclusion" = 3))
+```
+
+
+```{r study2a overall individualism plot, fig.pos="H",out.width="80%",fig.cap="Correlation between country-level individualism/collectivism and moral accessibility ratings on the Trolley dilemmas (higher moral acceptibility means higher acceptibility of the utilitarian choice).", echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+plot_data_country <- prepare_plot_data_country_means(utilitarian_trolley, "trolley")
+
+create_plot_country_utilitarianism(plot_data_country)
+
+# Save plot
+ggplot2::ggsave("figures/figs2.pdf", device = "pdf", plot = ggplot2::last_plot(), dpi = 300)
+```
+
+
+```{r study2b overall individualism plot, fig.pos="H",out.width="80%",fig.cap="Correlation between country-level individualism/collectivism and moral accessibility ratings on the Speedboat dilemmas (higher moral acceptibility means higher acceptibility of the utilitarian choice)", echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+plot_data_country <- prepare_plot_data_country_means(utilitarian_speedboat, "speedboat")
+
+create_plot_country_utilitarianism(plot_data_country)
+
+# Save plot
+ggplot2::ggsave("figures/figs4.pdf", device = "pdf", plot = ggplot2::last_plot(), dpi = 300)
+```
+
+
+```{r study2a overall individualism plot w/o exc, fig.pos="H",out.width="80%",fig.cap="Correlation between country-level individualism/collectivism and moral accessibility ratings on the Trolley dilemmas (higher moral acceptibility means higher acceptibility of the utilitarian choice)", echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+plot_data_country <- prepare_plot_data_country_means(utilitarian_trolley_nf, "trolley")
+
+create_plot_country_utilitarianism(plot_data_country)
+
+# Save plot
+ggplot2::ggsave("figures/figs6.pdf", device = "pdf", plot = ggplot2::last_plot(), dpi = 300)
+```
+
+
+```{r study2b overall individualism plot w/o excl, fig.pos="H",out.width="80%",fig.cap="Correlation between country-level individualism/collectivism and moral accessibility ratings on the Speedboat dilemmas (higher moral acceptibility means higher acceptibility of the utilitarian choice)", echo = FALSE, message = FALSE, warning = FALSE, paged.print = FALSE}
+plot_data_country <- prepare_plot_data_country_means(utilitarian_speedboat_nf, "speedboat")
+
+create_plot_country_utilitarianism(plot_data_country)
+
+# Save plot
+ggplot2::ggsave("figures/figs8.pdf", device = "pdf", plot = ggplot2::last_plot(), dpi = 300)
+```
+
+
+
+```{r, include=FALSE}
+options(tinytex.verbose = TRUE)
+```

@@ -1,0 +1,15 @@
+Explanation for the nobots data. 
+
+In our original/first submission we reported all data, as collected by national teams, in an effort to be as agnostic as possible about which participants should be retained for further analysis in future projects. That is, without applying any filters to the harmonized data ensuing from national teams due to the fact that cleaning decisions are—in our view—ultimately a decision for the research team conducting further  investigations using our data. This choice was informed by, and in line with, epistemological pluralism, instilled in the Open Science ethos (see, for example, UNESCO Open Science Declaration, NASA’s Transform Open Science, and FORRT’s code of conduct) but also due to methodological developments showing how researchers’ analytical choices (such as data exclusions, see Lonsdorf et al., 2019) affect the reliability and generalizability of scientific findings (Breznau et al., 2021; Gelman & Loken, 2013; Rubin, 2017). However, in order to facilitate reuse of our data, we have added an additional dataset with an extra cleaning layer that removes participants who failed our bot question (‘no bots data’) and participants with more than 50% missing data. We included a description of this in the “Data Records” section of our article (https://psyarxiv.com/a3562). This notbots data can be found in our OSF repository: the csv-file can be found at https://osf.io/98fex, and the spss-file can be found at https://osf.io/3yjga. We also added the code for this cleaned data to our reproducible report (https://osf.io/s5c4p).
+
+Breznau, N., Rinke, E., Wuttke, A., Adem, M., Adriaans, J., Alvarez-Benjumea, A., … Nguyen, H. H. V. (2021, March 24). Observing Many Researchers Using the Same Data and Hypothesis Reveals a Hidden Universe of Uncertainty. https://doi.org/10.31222/osf.io/cd5j9
+
+Gelman, A., & Loken, E. (2013). The garden of forking paths: Why multiple comparisons can be a problem, even when there is no “fishing expedition” or “p-hacking” and the research hypothesis was posited ahead of time. Department of Statistics, Columbia University, 348, 1-17.
+
+Lonsdorf, T. B., Klingelhöfer-Jens, M., Andreatta, M., Beckers, T., Chalkia, A., Gerlicher, A., ... & Merz, C. J. (2019). Navigating the garden of forking paths for data exclusions in fear conditioning research. Elife, 8, e52465.
+
+Pavlović, T., Azevedo, F., De, K., Riaño-Moreno, J. C., Maglić, M., Gkinopoulos, T., ... & Keudel, O. (2022). Predicting attitudinal and behavioral responses to COVID-19 pandemic using machine learning. PNAS nexus, 1(3), pgac093.
+
+Rubin, M. (2017). An evaluation of four solutions to the forking paths problem: Adjusted alpha, preregistration, sensitivity analyses, and abandoning the Neyman-Pearson approach. Review of General Psychology, 21(4), 321-329.
+
+Van Bavel, J. J., Cichocka, A., Capraro, V., Sjåstad, H., Nezlek, J. B., Pavlović, T., ... & Jørgensen, F. J. (2022). National identity predicts public health support during a global pandemic. Nature communications, 13(1), 1-14.

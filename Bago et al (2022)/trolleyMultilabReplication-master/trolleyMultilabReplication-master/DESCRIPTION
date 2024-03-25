@@ -1,0 +1,59 @@
+Package: trolleyMultilabReplication
+Type: Package
+Title: Analyses for the PSA006 Moral Thinking Across the World Multilab Replication Project
+Version: 0.1.0
+Authors@R:
+  c(person(given = "Marton",
+           family = "Kovacs",
+           role = c("cre", "aut"),
+           email = "maron.balazs.kovacs@gmail.com",
+           comment = c(ORCID = "0000-0002-8142-8492")),
+    person(given = "Bence", 
+           family = "Bago",
+           role = "ctb"),
+    person(given = "Tamas", 
+           family = "Nagy",
+           role = "ctb"))
+Maintainer: Marton Kovacs <marton.balazs.kovacs@gmail.com>
+Description: The package contains the full data preprocessign and analysis pipeline
+  for the PSA006 Moral Thinking Across the World Multilab Replication Project. 
+License: MIT + file LICENSE?
+Encoding: UTF-8
+LazyData: true
+URL: https://github.com/marton-balazs-kovacs/trolleyMultilabReplication
+BugReports: https://github.com/marton-balazs-kovacs/trolleyMultilabReplication/issues
+Imports: 
+    kableExtra,
+    lmerTest,
+    jsonlite,
+    vroom,
+    countrycode,
+    gt,
+    janitor,
+    here,
+    ggrepel,
+    dplyr,
+    purrr,
+    ggplot2,
+    tidyr,
+    rlang,
+    magrittr,
+    BayesFactor,
+    broom,
+    broom.mixed,
+    lme4,
+    broomExtra,
+    stringr,
+    tidyselect,
+    ggnewscale,
+    bayestestR,
+    effsize
+Depends: 
+    R (>= 2.10)
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+RoxygenNote: 7.2.1
+Remotes: 
+    crsh/papaja

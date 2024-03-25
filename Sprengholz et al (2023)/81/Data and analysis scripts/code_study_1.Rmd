@@ -1,0 +1,1209 @@
+---
+title: "S1 (Supplement Study 1)"
+output:
+  html_document:
+    number_sections: yes
+    self_contained: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+Last update: 10/09/2023
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+
+# Setting up libraries, data, functions
+
+library(readxl)
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(sjPlot)
+library(purrr)
+library(corrplot)
+library(reshape2)
+library(stringr)
+library(broom)
+library(effsize)
+
+
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+# hide code chunks 
+# knitr::opts_chunk$set(echo = FALSE)
+
+data <- readRDS("data_study_1.rds")
+
+tl <- function(text, wrap = 45) {
+  if (wrap == 0) {
+    text
+  } else {
+    text <- gsub(paste('(.{1,', wrap,'})(\\s|$)', sep=""), '\\1\n', text)
+    substr(text,1,nchar(text)-1)
+  }
+}
+
+fig.params <- theme(
+    axis.line.y = element_line(color = "#000000",linetype = "solid"),
+    axis.ticks.y = element_line(color = "#000000", linetype = "solid"),
+    axis.text.y = element_text(color="#000000", size=10, angle=0),
+    axis.title.y = element_text(color="#000000", size=10, angle=90),
+    axis.title.x = element_text(color="#000000", size=10, angle=0),
+    axis.text.x = element_text(color="#000000", size=10, angle=0),
+    axis.ticks.x = element_line(color = "#000000", linetype = "solid"),
+    legend.text = element_text(color="#000000", size=10, angle=0),
+    legend.title = element_text(color="#000000", size=10, angle=0),
+    legend.position = "bottom"
+)
+
+```
+
+# Variable and scale preparation
+
+## Internal consistency: Affective risk
+
+First survey (summer 2020 and winter 2020/2021)
+
+```{r}
+
+# Name factors
+data$T1_GENDER <- factor(data$T1_GENDER, levels = c(1,2), labels = c("male", "female"))
+data$T1_EDUCATION <- factor(data$T1_EDUCATION, levels = c(1,2,3), labels = c("up to 9 years", "10+ years with UEQ", "10+ years without UEQ"))
+
+# Scale preparation
+data$VSTATUS <- ifelse(data$VACSTATUS == 5, 0, 1)
+
+data$IDENT <- rowMeans(data[,c("IDENT_NOVAC_1", "IDENT_NOVAC_2", "IDENT_NOVAC_3", "IDENT_NOVAC_4", "IDENT_NOVAC_5", "IDENT_VAC_1", "IDENT_VAC_2", "IDENT_VAC_3", "IDENT_VAC_4", "IDENT_VAC_5")], na.rm = TRUE)
+
+psych::alpha(data[c("AFF_THINK", "AFF_FEAR", "AFF_WORRY")])
+data$AFFRISK <- 8-rowMeans(data[,c("AFF_THINK", "AFF_FEAR", "AFF_WORRY")], na.rm = TRUE)
+
+```
+
+Followup survey 
+
+```{r}
+
+psych::alpha(data[c("T1_AFF_THINK", "T1_AFF_FEAR", "T1_AFF_WORRY")])
+data$T1_AFFRISK <- 8-rowMeans(data[,c("T1_AFF_THINK", "T1_AFF_FEAR", "T1_AFF_WORRY")], na.rm = TRUE)
+
+#psych::alpha(data[c("AFF_THINK_SUMMER", "AFF_FEAR_SUMMER", "AFF_WORRY_SUMMER")])
+data$AFFRISK_SUMMER <- 8-rowMeans(data[,c("AFF_THINK_SUMMER", "AFF_FEAR_SUMMER", "AFF_WORRY_SUMMER")], na.rm = TRUE)
+
+#psych::alpha(data[c("AFF_THINK_WINTER", "AFF_FEAR_WINTER", "AFF_WORRY_WINTER")])
+data$AFFRISK_WINTER <- 8-rowMeans(data[,c("AFF_THINK_WINTER", "AFF_FEAR_WINTER", "AFF_WORRY_WINTER")], na.rm = TRUE)
+
+```
+
+## Internal consistency: Appropriateness of political action
+
+```{r}
+
+data$EXPERIENCE_SEVERECASES_R <- ifelse(data$EXPERIENCE_SEVERECASES == 2, 0, 1)
+data$EXPERIENCE_DEATHS_R <- ifelse(data$EXPERIENCE_DEATHS == 2, 0, 1)
+data$FINLOSS_R <- ifelse(data$FINLOSS == 2, 0, 1)
+
+data$CRT_BALL_CORRECT <- ifelse(data$CRT_BALL == 5, 1, 0)
+data$CRT_MACHINES_CORRECT <- ifelse(data$CRT_MACHINES == 5, 1, 0)
+data$CRT <- data$CRT_BALL_CORRECT + data$CRT_MACHINES_CORRECT
+
+data$RECAP_1_R <- 8 - data$RECAP_1
+data$RECAP_2_R <- 8 - data$RECAP_2
+data$RECAP_4_R <- 8 - data$RECAP_4
+
+psych::alpha(data[,c("RECAP_1_R", "RECAP_2_R", "RECAP_3", "RECAP_4_R", "RECAP_5", "RECAP_6", "RECAP_7", "RECAP_8", "RECAP_9")], check.keys = TRUE)
+data$RECAP <- 8-rowMeans(data[,c("RECAP_1_R", "RECAP_2_R", "RECAP_3", "RECAP_4_R", "RECAP_5", "RECAP_6", "RECAP_7", "RECAP_8", "RECAP_9")], na.rm=TRUE)
+
+```
+
+# Descriptives
+
+## Demographics
+
+### Age
+
+```{r}
+
+psych::describe(data$T1_AGE)
+
+```
+
+### Gender
+
+```{r}
+
+prop.table(table(data$T1_GENDER))
+
+```
+
+### Comparison by vaccination status
+
+Age, gender and vaccination status identification by vaccination status:
+
+```{r}
+
+data$VSTATUS_NAMED <- factor(data$VSTATUS, levels = c(0, 1), labels = c("Unvaccinated", "Vaccinated"))
+comparisons <-compareGroups::compareGroups(VSTATUS_NAMED ~ T1_AGE + T1_GENDER + IDENT, data = data)
+compareGroups::createTable(comparisons, show.all=TRUE)
+
+```
+
+# Recall (population model)
+
+```{r}
+
+# Preparation
+
+data$RE_PROB <- ifelse(data$T1 == "summer", data$PROB_SUMMER, data$PROB_WINTER)
+data$BIAS_PROB <- data$RE_PROB - data$T1_PROB 
+data$BIAS_STD_PROB <- data$BIAS_PROB/sd(data$BIAS_PROB, na.rm = TRUE)
+
+data$RE_SEVERITY <- ifelse(data$T1 == "summer", data$SEVERITY_SUMMER, data$SEVERITY_WINTER)
+data$BIAS_SEVERITY <- data$RE_SEVERITY - data$T1_SEVERITY
+data$BIAS_STD_SEVERITY <- data$BIAS_SEVERITY/sd(data$BIAS_SEVERITY, na.rm = TRUE)
+
+data$RE_AFFRISK <- ifelse(data$T1 == "summer", data$AFFRISK_SUMMER, data$AFFRISK_WINTER)
+data$BIAS_AFFRISK <- data$RE_AFFRISK - data$T1_AFFRISK 
+data$BIAS_STD_AFFRISK <- data$BIAS_AFFRISK/sd(data$BIAS_AFFRISK, na.rm = TRUE)
+
+data$RE_TRUST_GOV <- ifelse(data$T1 == "summer", data$TRUST_GOV_SUMMER, data$TRUST_GOV_WINTER)
+data$BIAS_TRUST_GOV <- data$RE_TRUST_GOV - data$T1_TRUST_GOV
+data$BIAS_STD_TRUST_GOV <- data$BIAS_TRUST_GOV/sd(data$BIAS_TRUST_GOV, na.rm = TRUE)
+
+data$RE_TRUST_SCIENCE <- ifelse(data$T1 == "summer", data$TRUST_SCIENCE_SUMMER, data$TRUST_SCIENCE_WINTER)
+data$BIAS_TRUST_SCIENCE <- data$RE_TRUST_SCIENCE - data$T1_TRUST_SCIENCE
+data$BIAS_STD_TRUST_SCIENCE <- data$BIAS_TRUST_SCIENCE/sd(data$BIAS_TRUST_SCIENCE, na.rm = TRUE)
+
+data$RE_TRUST_RKI <- ifelse(data$T1 == "summer", data$TRUST_RKI_SUMMER, data$TRUST_RKI_WINTER)
+data$BIAS_TRUST_RKI <- data$RE_TRUST_RKI - data$T1_TRUST_RKI
+data$BIAS_STD_TRUST_RKI <- data$BIAS_TRUST_RKI/sd(data$BIAS_TRUST_RKI, na.rm = TRUE)
+
+data$RE_USE_MASK <- ifelse(data$T1 == "summer", data$USE_MASK_SUMMER, data$USE_MASK_WINTER)
+data$BIAS_USE_MASK <- data$RE_USE_MASK - data$T1_USE_MASK
+data$BIAS_STD_USE_MASK <- data$BIAS_USE_MASK/sd(data$BIAS_USE_MASK, na.rm = TRUE)
+
+data$RE_EXAGG <- ifelse(data$T1 == "summer", data$EXAGG_SUMMER, data$EXAGG_WINTER)
+data$BIAS_EXAGG <- data$RE_EXAGG - data$T1_EXAGG
+data$BIAS_STD_EXAGG <- data$BIAS_EXAGG/sd(data$BIAS_EXAGG, na.rm = TRUE)
+
+data$RE_LIFESAT <- ifelse(data$T1 == "summer", data$LIFESAT_SUMMER, data$LIFESAT_WINTER)
+data$BIAS_LIFESAT <- data$RE_LIFESAT - data$T1_LIFESAT
+data$BIAS_STD_LIFESAT <- data$BIAS_LIFESAT/sd(data$BIAS_LIFESAT, na.rm = TRUE)
+
+variables <- c("PROB", "SEVERITY", "AFFRISK", "TRUST_GOV", "TRUST_SCIENCE", "TRUST_RKI", "USE_MASK", "EXAGG", "LIFESAT")
+variables.names <- c(
+    "PROB" = "Infection probability",
+    "SEVERITY" = "Infection severity",
+    "AFFRISK" = "Affective risk",
+    "TRUST_GOV" = "Trust in government",
+    "TRUST_SCIENCE" = "Trust in science",
+    "TRUST_RKI" = "Trust in RKI",
+    "USE_MASK" = "Mask wearing",
+    "EXAGG" = "Exaggeration perception",
+    "LIFESAT" = "Life satisfaction"
+)
+
+t1variables <- paste0("T1_", variables)
+t1variables.names <- variables.names
+names(t1variables.names) <- paste0("T1_", names(t1variables.names))
+
+revariables <- paste0("RE_", variables)
+revariables.names <- variables.names
+names(revariables.names) <- paste0("RE_", names(revariables.names))
+
+biasvariables <- paste0("BIAS_", variables)
+biasvariables.names <- variables.names
+names(biasvariables.names) <- paste0("BIAS_", names(biasvariables.names))
+
+stdbiasvariables <- paste0("BIAS_STD_", variables)
+stdbiasvariables.names <- variables.names
+names(stdbiasvariables.names) <- paste0("BIAS_STD_", names(stdbiasvariables.names))
+
+```
+
+## Visualization
+
+### Distributions
+
+```{r,warning = FALSE}
+variables_bias_figure <- c("BIAS_PROB", "BIAS_SEVERITY", "BIAS_AFFRISK", "BIAS_TRUST_GOV", "BIAS_TRUST_SCIENCE", "BIAS_USE_MASK", "BIAS_EXAGG", "BIAS_LIFESAT")
+
+variables_bias_figure.names <- c(
+  "BIAS_PROB" = "Infection probability",
+  "BIAS_SEVERITY" = "Infection severity",
+  "BIAS_AFFRISK" = "Affective risk",
+  "BIAS_TRUST_GOV" = "Trust in government",
+  "BIAS_TRUST_SCIENCE" = "Trust in science",
+  "BIAS_USE_MASK" = "Mask wearing",
+  "BIAS_EXAGG" = "Exaggeration perception",
+  "BIAS_LIFESAT" = "Life satisfaction"
+)
+
+data_high_VSI <- subset(data,data$IDENT >= 4) 
+data_low_VSI <- subset(data,data$IDENT < 4) 
+
+hist_fun <- function(dataset,variable, title_label){
+  data_plot <- dataset[c(variable,"VSTATUS")]
+  data_plot$VSTATUS <- ifelse(data_plot$VSTATUS == 1, "Vaccinated","Unvaccinated")
+  data_plot$VSTATUS <- factor(data_plot$VSTATUS)
+  
+  colnames(data_plot) <- c("x_var","VSTATUS")
+  ggplot(data = data_plot, aes(x = x_var , y = (after_stat(count)) / sum(after_stat(count)),  fill = VSTATUS)) +
+  geom_histogram(binwidth = 1, position = "dodge") +  # Use 'position = "dodge"' for side-by-side histograms
+    labs(title = title_label,
+         x = "Recall of past  - Actual past rating",
+         y = "Frequency") +
+  scale_fill_manual(values = c("#FF7000","#8D9EFF"),guide = guide_legend(title = NULL))+
+  geom_vline(xintercept = mean(data_plot$x_var[data_plot$VSTATUS == "Vaccinated"], na.rm=TRUE), linetype = "solid", color = "#8D9EFF") +
+  geom_vline(xintercept = mean(data_plot$x_var[data_plot$VSTATUS == "Unvaccinated"], na.rm=TRUE), linetype = "solid", color = "#FF7000")+
+  scale_x_continuous(limits = c(-7.2,7.2),breaks = seq(-7,7,1)) +
+  scale_y_continuous(limits = c(0, 0.45)) +   
+    theme_bw()+
+    theme( panel.grid.major = element_blank(),
+           panel.grid.minor = element_blank(),
+           plot.title = element_text(hjust = 0.5)) 
+  
+}
+
+plot_list_high <- list()
+plot_list_low <- list()
+
+# Loop through the variables and generate plots
+for (variable in variables_bias_figure) {
+  plot_list_high[[variable]] <- hist_fun(data_high_VSI,variable,variables_bias_figure.names[variable])
+}
+
+for (variable in variables_bias_figure) {
+  plot_list_low[[variable]] <- hist_fun(data_low_VSI,variable,variables_bias_figure.names[variable])
+}
+```
+
+```{r fig.width=14, fig.height=6,warning = FALSE}
+combined_plot_high <- ggarrange(plotlist = plot_list_high, ncol = 4, nrow = 2, common.legend = TRUE,legend = "bottom")
+
+combined_plot_high <- annotate_figure(combined_plot_high, top = text_grob("High vaccination status identification (>= 4)", 
+                                      face = "bold", size = 14))
+ggsave("combined_plots_high_VSI.pdf", combined_plot_high, width = 14, height = 6)
+combined_plot_high
+```
+
+```{r fig.width=14, fig.height=6, warning = FALSE}
+combined_plot_low <- ggarrange(plotlist = plot_list_low, ncol = 4, nrow = 2, common.legend = TRUE,legend = "bottom")
+
+combined_plot_low <- annotate_figure(combined_plot_low, top = text_grob("Low vaccination status identification (< 4)", 
+                                                                          face = "bold", size = 14))
+
+ggsave("combined_plots_low_VSI.pdf", combined_plot_low, width = 14, height = 6)
+
+combined_plot_low
+```
+
+Example values for infection probability as reported in the main text:
+
+```{r}
+
+mean(data[data$VSTATUS == 0,]$T1_PROB)
+sd(data[data$VSTATUS == 0,]$T1_PROB)
+
+mean(data[data$VSTATUS == 0,]$RE_PROB)
+sd(data[data$VSTATUS == 0,]$RE_PROB)
+
+
+mean(data[data$VSTATUS == 1,]$T1_PROB)
+sd(data[data$VSTATUS == 1,]$T1_PROB)
+
+mean(data[data$VSTATUS == 1,]$RE_PROB)
+sd(data[data$VSTATUS == 1,]$RE_PROB)
+
+tmp <- reshape2::melt(data[data$VSTATUS == 1,c("T1_PROB", "RE_PROB")])
+rstatix::cohens_d(tmp, value ~ variable)
+
+
+
+
+```
+
+
+### T&B Model 
+
+```{r fig.width=9, fig.height=6}
+
+getLineParams <- function(p1, p2) {
+  m = (p1[2]-p2[2])/(p1[1]-p2[1])
+  n = p1[2] - m * p1[1]
+  return(c(m,n))
+}
+
+plotcounter = 0
+chars = c("A", "B", "C", "D", "E", "F", "G", "H")
+
+plotTBM <- function(variable) {
+  
+  plotcounter <<- plotcounter + 1;
+  
+  explainer_vac = data.frame(TRUTH = numeric(), BIAS = numeric(), RECALL = numeric())
+  if (plotcounter == 1) {
+    explainer_vac <- data.frame(TRUTH = 4, BIAS = 2.29, RECALL = 0)
+  }
+  
+  explainer_novac = data.frame(TRUTH = numeric(), BIAS = numeric(), RECALL = numeric())
+  if (plotcounter == 1) {
+    explainer_novac <- data.frame(TRUTH = 4, BIAS = 4.76, RECALL = 0)
+  }
+  
+  truthVar <- paste0("T1_", variable)
+  biasVar <- variable
+  recallVar <- paste0("RE_", variable)
+  min <- 1
+  max <- max(data[variable])
+  mid <- min + (max-min)/2
+  
+  mean <- mean(data$IDENT)
+  plusSD <- mean(data$IDENT)+sd(data$IDENT)
+  minusSD <- mean(data$IDENT)-sd(data$IDENT)
+  
+  plotdata <- as.data.frame(expand.grid(c(((min*100):(max*100)))/100, c((min*100):(max*100))/100, c(0,1), c(plusSD, mean, minusSD)))
+  names(plotdata) <- c(truthVar, biasVar, "VSTATUS", "IDENT")
+  plotdata$RECALL <- pmax(pmin(predict(lm(formula=paste(recallVar, "~", truthVar, "*VSTATUS*IDENT +", biasVar, "*VSTATUS*IDENT"), data = data), plotdata), max), min)
+  names(plotdata) <- c("TRUTH", "BIAS", "VSTATUS", "IDENT", "RECALL")
+
+  lines <- data.frame(
+    VSTATUS = character(),
+    IDENT = character(),
+    M = numeric(),
+    N = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  for (v in c(0,1)) {
+    for (i in c(minusSD, mean, plusSD)) {
+    
+    subset <- plotdata[plotdata$VSTATUS == v & plotdata$IDENT == i,]
+    
+    p1_left <- as.numeric(subset %>% filter(TRUTH == min) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    p1_top <- as.numeric(subset %>% filter(BIAS == max) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    if(abs(p1_left[3]-mid) < abs(p1_top[3]-mid)) {
+      p1 <- p1_left
+    } else {
+      p1 <- p1_top
+    }
+  
+    p2_right <- as.numeric(subset %>% filter(TRUTH == max) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    p2_bottom <- as.numeric(subset %>% filter(BIAS == min) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    if(abs(p2_right[3]-mid) < abs(p2_bottom[3]-mid)) {
+      p2 <- p2_right
+    } else {
+      p2 <- p2_bottom
+    }
+    
+    lines[nrow(lines)+1,] <- list(v, i, getLineParams(p1, p2)[1], getLineParams(p1, p2)[2])
+    
+    }}
+  
+  lines$IDENT_NAME <- ifelse(lines$IDENT == mean, "M", ifelse(lines$IDENT == minusSD, "-1SD", "+1SD"))
+  lines$IDENT_X_VSTATUS <- paste0(lines$VSTATUS, lines$IDENT_NAME)
+  
+  lines$IDENT_X_VSTATUS <- factor(lines$IDENT_X_VSTATUS, levels = c("0-1SD", "0M", "0+1SD", "1-1SD", "1M", "1+1SD"))
+  
+  
+    
+  ggplot(data=plotdata, aes(TRUTH, BIAS, z = RECALL)) +
+    geom_raster(fill = "#ffffff") +
+    theme_minimal(
+    #) + facet_grid(
+    #  . ~ VSTATUS, 
+    #  labeller = labeller(VSTATUS = c("0" = "Unvaccinated", "1" = "Vaccinated"))
+    #) + scale_fill_gradientn(
+    #  name = "Recall",
+    #  breaks = c(min,max),
+    #  limits = c(min,max),
+    #  labels = c("1", "5 or 7"),
+    #  colours = c("#8D9EFF", "#FFFFFF", "#FF7000")
+    ) + scale_x_continuous(
+      name = ifelse(plotcounter %in% c(5,6,7,8), "Past rating", ""),
+      breaks = c(min:max)
+    ) + scale_y_continuous(
+      name = ifelse(plotcounter %in% c(1,5), "Present rating", ""),
+      breaks = c(min:max)
+    ) + theme(
+      panel.grid = element_blank(),
+      panel.border = element_rect(colour = "#000000", linetype="solid", fill=NA, size=0.4),
+      axis.ticks.x = element_line(color = "#000000", linetype = "solid", size=0.25),
+      axis.ticks.y = element_line(color = "#000000", linetype = "solid", size=0.25),
+      strip.text = element_text(color="#000000", size=10, angle=0),
+      axis.text.y = element_text(color="#000000", size=10, angle=0),
+      axis.title.y = element_text(color="#000000", size=10, angle=90),
+      axis.title.x = element_text(color="#000000", size=10, angle=0),
+      axis.text.x = element_text(color="#000000", size=10, angle=0),
+      plot.title = element_text(color="#000000", size=10, angle=0, face="bold"),
+      legend.text = element_text(color="#000000", size=10, angle=0),
+      legend.title = element_text(color="#000000", size=10, angle=0),
+      legend.position = "bottom"
+    ) + coord_fixed(
+      ratio=1, 
+      expand = 0
+    ) + geom_hline(
+      yintercept = mid, 
+      size = 0.2
+    ) + geom_vline(
+      xintercept = mid, 
+      size = 0.2
+    ) + geom_abline(
+      data=lines, 
+      aes(slope=M, intercept=N, linetype=IDENT_X_VSTATUS, color=IDENT_X_VSTATUS), 
+      size=0.6
+    ) + scale_linetype_manual(
+      name = "Recall (at scale midpoint) for   ",
+      labels = c(
+        "0-1SD" = "",
+        "0M" = "",
+        "0+1SD" = "Unvaccinated (VSI: -1SD, M, +1SD)   ",
+        "1-1SD" = "",
+        "1M" = "",
+        "1+1SD" = "Vaccinated (VSI: -1SD, M, +1SD)"
+      ),
+      values = c(
+        "0-1SD" = "dotted",
+        "0M" = "dashed",
+        "0+1SD" = "solid",
+        "1-1SD" = "dotted",
+        "1M" = "dashed",
+        "1+1SD" = "solid"
+      )
+    ) + scale_color_manual(
+      name = "Recall (at scale midpoint) for   ",
+      labels = c(
+        "0-1SD" = "",
+        "0M" = "",
+        "0+1SD" = "Unvaccinated (VSI: -1SD, M, +1SD)   ",
+        "1-1SD" = "",
+        "1M" = "",
+        "1+1SD" = "Vaccinated (VSI: -1SD, M, +1SD)"
+      ),
+      values = c(
+        "0-1SD" = "#FF7000",
+        "0M" = "#FF7000",  
+        "0+1SD" = "#FF7000",
+        "1-1SD" = "#8D9EFF",
+        "1M" = "#8D9EFF",
+        "1+1SD" = "#8D9EFF"
+      )
+    ) + ggtitle(
+      paste0("(", chars[plotcounter], ") ", variables.names[variable])
+    ) +guides(linetype=guide_legend(nrow=1,byrow=TRUE)) + geom_point(data = explainer_vac, col = '#8D9EFF', size=3) + geom_point(data = explainer_novac, col = '#FF7000', size=3)
+  
+}
+
+plotlist <- purrr::map(variables[variables!="TRUST_RKI"], plotTBM)
+#plotlist <- c(list(plot_example), plotlist)
+fig_1 <- ggarrange(plotlist=plotlist, common.legend = TRUE, legend = "bottom", align = "hv", ncol=4, nrow=2)
+
+fig_1
+
+png("fig_1.png",height=13,width=22,units="cm",res=300)
+print(fig_1)
+dev.off()
+
+pdf("fig_1.pdf",height=6,width=10)
+print(fig_1)
+dev.off()
+
+```
+
+## Regression tables
+
+Each analyses is performed for all participants and separately for participants from summer and winter periods.
+
+### Infection probability
+
+```{r }
+
+# center all variables by the grand mean of the truth (current rating)
+data$RE_PROB_C <- datawizard::center(data$RE_PROB, reference=data$T1_PROB)
+data$T1_PROB_C <- datawizard::center(data$T1_PROB, reference=data$T1_PROB)
+data$PROB_C <- datawizard::center(data$PROB, reference=data$T1_PROB)
+
+model <- lm(RE_PROB_C ~ factor(VSTATUS) * IDENT * T1_PROB_C + factor(VSTATUS) * IDENT * PROB_C, data = data)
+model_summer <- lm(RE_PROB_C ~ factor(VSTATUS) * IDENT * T1_PROB_C + factor(VSTATUS) * IDENT * PROB_C, data = data[data$T1 == "summer",])
+model_winter <- lm(RE_PROB_C ~ factor(VSTATUS) * IDENT * T1_PROB_C + factor(VSTATUS) * IDENT * PROB_C, data = data[data$T1 == "winter",])
+tab_model(model, model_summer, model_winter, pred.labels = c(
+  "T1_PROB_C" = "Past evaluation", 
+  "PROB_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_PROB_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_PROB_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:PROB_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:PROB_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_PROB_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:PROB_C" = "Interaction: Present evaluation x Vaccinated x Identification"
+), dv.labels = c("All", "Summer 2020", "Winter 2020/2021"), title = "Recall of infection probability", show.std=TRUE, show.se = TRUE)
+
+```
+
+**Controlling for age, gender, education, income, CRT scores, current and past life satisfaction (all participants):**
+
+```{r }
+
+model_control <- lm(RE_PROB_C ~ factor(VSTATUS) * IDENT * T1_PROB_C + factor(VSTATUS) * IDENT * PROB_C + T1_AGE + T1_GENDER + LIFESAT + T1_LIFESAT + CRT + factor(T1_INCOME_HH) + factor(T1_EDUCATION), data = data)
+
+tab_model(model, model_control, pred.labels = c(
+  "T1_PROB_C" = "Past evaluation", 
+  "PROB_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_PROB_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_PROB_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:PROB_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:PROB_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_PROB_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:PROB_C" = "Interaction: Present evaluation x Vaccinated x Identification",
+  "T1_AGE" = "Age",
+  "T1_GENDERfemale" = "Gender: female (Baseline: male)",
+  "LIFESAT" = "Current life satisfaction",
+  "T1_LIFESAT" = "Past life satisfaction",
+  "CRT" = "Cognitive reflection (CRT)",
+  "factor(T1_INCOME_HH)2" = "Income: 1250-1749 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)3" = "Income: 1750-2249 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)4" = "Income: 2250-2999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)5" = "Income: 3000-3999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)6" = "Income: 4000-4999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)7" = "Income: 5000 EUR or more (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)88" = "Income: no answer (Baseline: <1250 EUR)",
+  "factor(T1_EDUCATION)10+ years with UEQ" = "School education: 10+ years with university entrance qualification (Baseline: up to 9 years)",
+  "factor(T1_EDUCATION)10+ years without UEQ" = "School education: 10+ years without university entrance qualification (Baseline: up to 9 years)"
+), dv.labels = c("Without control variables", "With control variables"), title = "Recall of infection probability", show.std=TRUE, show.se = TRUE)
+
+```
+
+### Infection severity
+
+```{r}
+
+# center all variables by the grand mean of the truth (current rating)
+data$RE_SEVERITY_C <- datawizard::center(data$RE_SEVERITY, reference=data$T1_SEVERITY)
+data$T1_SEVERITY_C <- datawizard::center(data$T1_SEVERITY, reference=data$T1_SEVERITY)
+data$SEVERITY_C <- datawizard::center(data$SEVERITY, reference=data$T1_SEVERITY)
+
+model <- lm(RE_SEVERITY_C ~ factor(VSTATUS) * IDENT * T1_SEVERITY_C + factor(VSTATUS) * IDENT * SEVERITY_C, data = data)
+model_summer <- lm(RE_SEVERITY_C ~ factor(VSTATUS) * IDENT * T1_SEVERITY_C + factor(VSTATUS) * IDENT * SEVERITY_C, data = data[data$T1 == "summer",])
+model_winter <- lm(RE_SEVERITY_C ~ factor(VSTATUS) * IDENT * T1_SEVERITY_C + factor(VSTATUS) * IDENT * SEVERITY_C, data = data[data$T1 == "winter",])
+tab_model(model, model_summer, model_winter, pred.labels = c(
+  "T1_SEVERITY_C" = "Past evaluation", 
+  "SEVERITY_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_SEVERITY_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_SEVERITY_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:SEVERITY_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:SEVERITY_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_SEVERITY_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:SEVERITY_C" = "Interaction: Present evaluation x Vaccinated x Identification"
+), dv.labels = c("All", "Summer 2020", "Winter 2020/2021"), title = "Recall of infection severity", show.std=TRUE, show.se = TRUE)
+
+```
+
+**Controlling for age, gender, education, income, CRT scores, current and past life satisfaction (all participants):**
+
+```{r }
+
+model_control <- lm(RE_SEVERITY_C ~ factor(VSTATUS) * IDENT * T1_SEVERITY_C + factor(VSTATUS) * IDENT * SEVERITY_C + T1_AGE + T1_GENDER + LIFESAT + T1_LIFESAT + CRT + factor(T1_INCOME_HH) + factor(T1_EDUCATION), data = data)
+
+tab_model(model, model_control, pred.labels = c(
+  "T1_SEVERITY_C" = "Past evaluation", 
+  "SEVERITY_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_SEVERITY_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_SEVERITY_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:SEVERITY_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:SEVERITY_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_SEVERITY_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:SEVERITY_C" = "Interaction: Present evaluation x Vaccinated x Identification",
+  "T1_AGE" = "Age",
+  "T1_GENDERfemale" = "Gender: female (Baseline: male)",
+  "LIFESAT" = "Current life satisfaction",
+  "T1_LIFESAT" = "Past life satisfaction",
+  "CRT" = "Cognitive reflection (CRT)",
+  "factor(T1_INCOME_HH)2" = "Income: 1250-1749 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)3" = "Income: 1750-2249 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)4" = "Income: 2250-2999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)5" = "Income: 3000-3999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)6" = "Income: 4000-4999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)7" = "Income: 5000 EUR or more (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)88" = "Income: no answer (Baseline: <1250 EUR)",
+  "factor(T1_EDUCATION)10+ years with UEQ" = "School education: 10+ years with university entrance qualification (Baseline: up to 9 years)",
+  "factor(T1_EDUCATION)10+ years without UEQ" = "School education: 10+ years without university entrance qualification (Baseline: up to 9 years)"
+), dv.labels = c("Without control variables", "With control variables"), title = "Recall of infection severity", show.std=TRUE, show.se = TRUE)
+
+```
+
+### Affective risk
+
+```{r}
+
+# center all variables by the grand mean of the truth (current rating)
+data$RE_AFFRISK_C <- datawizard::center(data$RE_AFFRISK, reference=data$T1_AFFRISK)
+data$T1_AFFRISK_C <- datawizard::center(data$T1_AFFRISK, reference=data$T1_AFFRISK)
+data$AFFRISK_C <- datawizard::center(data$AFFRISK, reference=data$T1_AFFRISK)
+
+model <- lm(RE_AFFRISK_C ~ factor(VSTATUS) * IDENT * T1_AFFRISK_C + factor(VSTATUS) * IDENT * AFFRISK_C, data = data)
+model_summer <- lm(RE_AFFRISK_C ~ factor(VSTATUS) * IDENT * T1_AFFRISK_C + factor(VSTATUS) * IDENT * AFFRISK_C, data = data[data$T1 == "summer",])
+model_winter <- lm(RE_AFFRISK_C ~ factor(VSTATUS) * IDENT * T1_AFFRISK_C + factor(VSTATUS) * IDENT * AFFRISK_C, data = data[data$T1 == "winter",])
+tab_model(model, model_summer, model_winter, pred.labels = c(
+  "T1_AFFRISK_C" = "Past evaluation", 
+  "AFFRISK_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_AFFRISK_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_AFFRISK_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:AFFRISK_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:AFFRISK_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_AFFRISK_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:AFFRISK_C" = "Interaction: Present evaluation x Vaccinated x Identification"
+), dv.labels = c("All", "Summer 2020", "Winter 2020/2021"), title = "Recall of affective risk", show.std=TRUE, show.se = TRUE)
+
+```
+
+**Controlling for age, gender, education, income, CRT scores, current and past life satisfaction (all participants):**
+
+```{r }
+
+model_control <- lm(RE_AFFRISK_C ~ factor(VSTATUS) * IDENT * T1_AFFRISK_C + factor(VSTATUS) * IDENT * AFFRISK_C + T1_AGE + T1_GENDER + LIFESAT + T1_LIFESAT + CRT + factor(T1_INCOME_HH) + factor(T1_EDUCATION), data = data)
+
+tab_model(model, model_control, pred.labels = c(
+  "T1_AFFRISK_C" = "Past evaluation", 
+  "AFFRISK_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_AFFRISK_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_AFFRISK_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:AFFRISK_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:AFFRISK_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_AFFRISK_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:AFFRISK_C" = "Interaction: Present evaluation x Vaccinated x Identification",
+  "T1_AGE" = "Age",
+  "T1_GENDERfemale" = "Gender: female (Baseline: male)",
+  "LIFESAT" = "Current life satisfaction",
+  "T1_LIFESAT" = "Past life satisfaction",
+  "CRT" = "Cognitive reflection (CRT)",
+  "factor(T1_INCOME_HH)2" = "Income: 1250-1749 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)3" = "Income: 1750-2249 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)4" = "Income: 2250-2999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)5" = "Income: 3000-3999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)6" = "Income: 4000-4999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)7" = "Income: 5000 EUR or more (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)88" = "Income: no answer (Baseline: <1250 EUR)",
+  "factor(T1_EDUCATION)10+ years with UEQ" = "School education: 10+ years with university entrance qualification (Baseline: up to 9 years)",
+  "factor(T1_EDUCATION)10+ years without UEQ" = "School education: 10+ years without university entrance qualification (Baseline: up to 9 years)"
+), dv.labels = c("Without control variables", "With control variables"), title = "Recall of affective risk", show.std=TRUE, show.se = TRUE)
+
+```
+
+### Trust in government
+
+```{r}
+
+# center all variables by the grand mean of the truth (current rating)
+data$RE_TRUST_GOV_C <- datawizard::center(data$RE_TRUST_GOV, reference=data$T1_TRUST_GOV)
+data$T1_TRUST_GOV_C <- datawizard::center(data$T1_TRUST_GOV, reference=data$T1_TRUST_GOV)
+data$TRUST_GOV_C <- datawizard::center(data$TRUST_GOV, reference=data$T1_TRUST_GOV)
+
+model <- lm(RE_TRUST_GOV_C ~ factor(VSTATUS) * IDENT * T1_TRUST_GOV_C + factor(VSTATUS) * IDENT * TRUST_GOV_C, data = data)
+model_summer <- lm(RE_TRUST_GOV_C ~ factor(VSTATUS) * IDENT * T1_TRUST_GOV_C + factor(VSTATUS) * IDENT * TRUST_GOV_C, data = data[data$T1 == "summer",])
+model_winter <- lm(RE_TRUST_GOV_C ~ factor(VSTATUS) * IDENT * T1_TRUST_GOV_C + factor(VSTATUS) * IDENT * TRUST_GOV_C, data = data[data$T1 == "winter",])
+tab_model(model, model_summer, model_winter, pred.labels = c(
+  "T1_TRUST_GOV_C" = "Past evaluation", 
+  "TRUST_GOV_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_TRUST_GOV_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_TRUST_GOV_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:TRUST_GOV_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:TRUST_GOV_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_TRUST_GOV_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:TRUST_GOV_C" = "Interaction: Present evaluation x Vaccinated x Identification"
+), dv.labels = c("All", "Summer 2020", "Winter 2020/2021"), title = "Recall of trust in government", show.std=TRUE, show.se = TRUE)
+
+```
+
+**Controlling for age, gender, education, income, CRT scores, current and past life satisfaction (all participants):**
+
+```{r }
+
+model_control <- lm(RE_TRUST_GOV_C ~ factor(VSTATUS) * IDENT * T1_TRUST_GOV_C + factor(VSTATUS) * IDENT * TRUST_GOV_C + T1_AGE + T1_GENDER + LIFESAT + T1_LIFESAT + CRT + factor(T1_INCOME_HH) + factor(T1_EDUCATION), data = data)
+
+tab_model(model, model_control, pred.labels = c(
+  "T1_TRUST_GOV_C" = "Past evaluation", 
+  "TRUST_GOV_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_TRUST_GOV_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_TRUST_GOV_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:TRUST_GOV_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:TRUST_GOV_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_TRUST_GOV_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:TRUST_GOV_C" = "Interaction: Present evaluation x Vaccinated x Identification",
+  "T1_AGE" = "Age",
+  "T1_GENDERfemale" = "Gender: female (Baseline: male)",
+  "LIFESAT" = "Current life satisfaction",
+  "T1_LIFESAT" = "Past life satisfaction",
+  "CRT" = "Cognitive reflection (CRT)",
+  "factor(T1_INCOME_HH)2" = "Income: 1250-1749 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)3" = "Income: 1750-2249 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)4" = "Income: 2250-2999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)5" = "Income: 3000-3999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)6" = "Income: 4000-4999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)7" = "Income: 5000 EUR or more (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)88" = "Income: no answer (Baseline: <1250 EUR)",
+  "factor(T1_EDUCATION)10+ years with UEQ" = "School education: 10+ years with university entrance qualification (Baseline: up to 9 years)",
+  "factor(T1_EDUCATION)10+ years without UEQ" = "School education: 10+ years without university entrance qualification (Baseline: up to 9 years)"
+), dv.labels = c("Without control variables", "With control variables"), title = "Recall of trust in government", show.std=TRUE, show.se = TRUE)
+
+```
+
+### Trust in science
+
+```{r}
+
+# center all variables by the grand mean of the truth (current rating)
+data$RE_TRUST_SCIENCE_C <- datawizard::center(data$RE_TRUST_SCIENCE, reference=data$T1_TRUST_SCIENCE)
+data$T1_TRUST_SCIENCE_C <- datawizard::center(data$T1_TRUST_SCIENCE, reference=data$T1_TRUST_SCIENCE)
+data$TRUST_SCIENCE_C <- datawizard::center(data$TRUST_SCIENCE, reference=data$T1_TRUST_SCIENCE)
+
+model <- lm(RE_TRUST_SCIENCE_C ~ factor(VSTATUS) * IDENT * T1_TRUST_SCIENCE_C + factor(VSTATUS) * IDENT * TRUST_SCIENCE_C, data = data)
+model_summer <- lm(RE_TRUST_SCIENCE_C ~ factor(VSTATUS) * IDENT * T1_TRUST_SCIENCE_C + factor(VSTATUS) * IDENT * TRUST_SCIENCE_C, data = data[data$T1 == "summer",])
+model_winter <- lm(RE_TRUST_SCIENCE_C ~ factor(VSTATUS) * IDENT * T1_TRUST_SCIENCE_C + factor(VSTATUS) * IDENT * TRUST_SCIENCE_C, data = data[data$T1 == "winter",])
+tab_model(model, model_summer, model_winter, pred.labels = c(
+  "T1_TRUST_SCIENCE_C" = "Past evaluation", 
+  "TRUST_SCIENCE_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_TRUST_SCIENCE_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_TRUST_SCIENCE_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_TRUST_SCIENCE_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Vaccinated x Identification"
+), dv.labels = c("All", "Summer 2020", "Winter 2020/2021"), title = "Recall of trust in science", show.std=TRUE, show.se = TRUE)
+
+```
+
+**Controlling for age, gender, education, income, CRT scores, current and past life satisfaction (all participants):**
+
+```{r }
+
+model_control <- lm(RE_TRUST_SCIENCE_C ~ factor(VSTATUS) * IDENT * T1_TRUST_SCIENCE_C + factor(VSTATUS) * IDENT * TRUST_SCIENCE_C + T1_AGE + T1_GENDER + LIFESAT + T1_LIFESAT + CRT + factor(T1_INCOME_HH) + factor(T1_EDUCATION), data = data)
+
+tab_model(model, model_control, pred.labels = c(
+  "T1_TRUST_SCIENCE_C" = "Past evaluation", 
+  "TRUST_SCIENCE_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_TRUST_SCIENCE_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_TRUST_SCIENCE_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_TRUST_SCIENCE_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Vaccinated x Identification",
+  "T1_AGE" = "Age",
+  "T1_GENDERfemale" = "Gender: female (Baseline: male)",
+  "LIFESAT" = "Current life satisfaction",
+  "T1_LIFESAT" = "Past life satisfaction",
+  "CRT" = "Cognitive reflection (CRT)",
+  "factor(T1_INCOME_HH)2" = "Income: 1250-1749 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)3" = "Income: 1750-2249 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)4" = "Income: 2250-2999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)5" = "Income: 3000-3999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)6" = "Income: 4000-4999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)7" = "Income: 5000 EUR or more (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)88" = "Income: no answer (Baseline: <1250 EUR)",
+  "factor(T1_EDUCATION)10+ years with UEQ" = "School education: 10+ years with university entrance qualification (Baseline: up to 9 years)",
+  "factor(T1_EDUCATION)10+ years without UEQ" = "School education: 10+ years without university entrance qualification (Baseline: up to 9 years)"
+), dv.labels = c("Without control variables", "With control variables"), title = "Recall of trust in science", show.std=TRUE, show.se = TRUE)
+
+```
+
+### Mask wearing
+
+```{r}
+
+# center all variables by the grand mean of the truth (current rating)
+data$RE_USE_MASK_C <- datawizard::center(data$RE_USE_MASK, reference=data$T1_USE_MASK)
+data$T1_USE_MASK_C <- datawizard::center(data$T1_USE_MASK, reference=data$T1_USE_MASK)
+data$USE_MASK_C <- datawizard::center(data$USE_MASK, reference=data$T1_USE_MASK)
+
+model <- lm(RE_USE_MASK_C ~ factor(VSTATUS) * IDENT * T1_USE_MASK_C + factor(VSTATUS) * IDENT * USE_MASK_C, data = data)
+model_summer <- lm(RE_USE_MASK_C ~ factor(VSTATUS) * IDENT * T1_USE_MASK_C + factor(VSTATUS) * IDENT * USE_MASK_C, data = data[data$T1 == "summer",])
+model_winter <- lm(RE_USE_MASK_C ~ factor(VSTATUS) * IDENT * T1_USE_MASK_C + factor(VSTATUS) * IDENT * USE_MASK_C, data = data[data$T1 == "winter",])
+tab_model(model, model_summer, model_winter, pred.labels = c(
+  "T1_USE_MASK_C" = "Past evaluation", 
+  "USE_MASK_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_USE_MASK" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_USE_MASK_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:USE_MASK_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:USE_MASK_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_USE_MASK_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:USE_MASK_C" = "Interaction: Present evaluation x Vaccinated x Identification"
+), dv.labels = c("All", "Summer 2020", "Winter 2020/2021"), title = "Recall of mask wearing", show.std=TRUE, show.se = TRUE)
+
+```
+
+**Controlling for age, gender, education, income, CRT scores, current and past life satisfaction (all participants):**
+
+```{r }
+
+model_control <- lm(RE_USE_MASK_C ~ factor(VSTATUS) * IDENT * T1_USE_MASK_C + factor(VSTATUS) * IDENT * USE_MASK_C + T1_AGE + T1_GENDER + LIFESAT + T1_LIFESAT + CRT + factor(T1_INCOME_HH) + factor(T1_EDUCATION), data = data)
+
+tab_model(model, model_control, pred.labels = c(
+  "T1_USE_MASK_C" = "Past evaluation", 
+  "USE_MASK_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_USE_MASK" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_USE_MASK_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:USE_MASK_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:USE_MASK_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_USE_MASK_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:USE_MASK_C" = "Interaction: Present evaluation x Vaccinated x Identification",
+  "T1_AGE" = "Age",
+  "T1_GENDERfemale" = "Gender: female (Baseline: male)",
+  "LIFESAT" = "Current life satisfaction",
+  "T1_LIFESAT" = "Past life satisfaction",
+  "CRT" = "Cognitive reflection (CRT)",
+  "factor(T1_INCOME_HH)2" = "Income: 1250-1749 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)3" = "Income: 1750-2249 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)4" = "Income: 2250-2999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)5" = "Income: 3000-3999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)6" = "Income: 4000-4999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)7" = "Income: 5000 EUR or more (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)88" = "Income: no answer (Baseline: <1250 EUR)",
+  "factor(T1_EDUCATION)10+ years with UEQ" = "School education: 10+ years with university entrance qualification (Baseline: up to 9 years)",
+  "factor(T1_EDUCATION)10+ years without UEQ" = "School education: 10+ years without university entrance qualification (Baseline: up to 9 years)"
+), dv.labels = c("Without control variables", "With control variables"), title = "Recall of mask wearing", show.std=TRUE, show.se = TRUE)
+
+```
+
+### Exaggeration perceptions
+
+```{r}
+
+# center all variables by the grand mean of the truth (current rating)
+data$RE_EXAGG_C <- datawizard::center(data$RE_EXAGG, reference=data$T1_EXAGG)
+data$T1_EXAGG_C <- datawizard::center(data$T1_EXAGG, reference=data$T1_EXAGG)
+data$EXAGG_C <- datawizard::center(data$EXAGG, reference=data$T1_EXAGG)
+
+model <- lm(RE_EXAGG_C ~ factor(VSTATUS) * IDENT * T1_EXAGG_C + factor(VSTATUS) * IDENT * EXAGG_C, data = data)
+model_summer <- lm(RE_EXAGG_C ~ factor(VSTATUS) * IDENT * T1_EXAGG_C + factor(VSTATUS) * IDENT * EXAGG_C, data = data[data$T1 == "summer",])
+model_winter <- lm(RE_EXAGG_C ~ factor(VSTATUS) * IDENT * T1_EXAGG_C + factor(VSTATUS) * IDENT * EXAGG_C, data = data[data$T1 == "winter",])
+tab_model(model, model_summer, model_winter, pred.labels = c(
+  "T1_EXAGG_C" = "Past evaluation", 
+  "EXAGG_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_EXAGG_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_EXAGG_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:EXAGG_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:EXAGG_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_EXAGG_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:EXAGG_C" = "Interaction: Present evaluation x Vaccinated x Identification"
+), dv.labels = c("All", "Summer 2020", "Winter 2020/2021"), title = "Recall of exaggeration perceptions", show.std=TRUE, show.se = TRUE)
+
+```
+
+**Controlling for age, gender, education, income, CRT scores, current and past life satisfaction (all participants):**
+
+```{r }
+
+model_control <- lm(RE_EXAGG_C ~ factor(VSTATUS) * IDENT * T1_EXAGG_C + factor(VSTATUS) * IDENT * EXAGG_C + T1_AGE + T1_GENDER + LIFESAT + T1_LIFESAT + CRT + factor(T1_INCOME_HH) + factor(T1_EDUCATION), data = data)
+
+tab_model(model, model_control, pred.labels = c(
+  "T1_EXAGG_C" = "Past evaluation", 
+  "EXAGG_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_EXAGG_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_EXAGG_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:EXAGG_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:EXAGG_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_EXAGG_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:EXAGG_C" = "Interaction: Present evaluation x Vaccinated x Identification",
+  "T1_AGE" = "Age",
+  "T1_GENDERfemale" = "Gender: female (Baseline: male)",
+  "LIFESAT" = "Current life satisfaction",
+  "T1_LIFESAT" = "Past life satisfaction",
+  "CRT" = "Cognitive reflection (CRT)",
+  "factor(T1_INCOME_HH)2" = "Income: 1250-1749 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)3" = "Income: 1750-2249 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)4" = "Income: 2250-2999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)5" = "Income: 3000-3999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)6" = "Income: 4000-4999 EUR (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)7" = "Income: 5000 EUR or more (Baseline: <1250 EUR)",
+  "factor(T1_INCOME_HH)88" = "Income: no answer (Baseline: <1250 EUR)",
+  "factor(T1_EDUCATION)10+ years with UEQ" = "School education: 10+ years with university entrance qualification (Baseline: up to 9 years)",
+  "factor(T1_EDUCATION)10+ years without UEQ" = "School education: 10+ years without university entrance qualification (Baseline: up to 9 years)"
+), dv.labels = c("Without control variables", "With control variables"), title = "Recall of exaggeration perceptions", show.std=TRUE, show.se = TRUE)
+
+```
+
+### Life satisfaction
+
+```{r}
+
+# center all variables by the grand mean of the truth (current rating)
+data$RE_LIFESAT_C <- datawizard::center(data$RE_LIFESAT, reference=data$T1_LIFESAT)
+data$T1_LIFESAT_C <- datawizard::center(data$T1_LIFESAT, reference=data$T1_LIFESAT)
+data$LIFESAT_C <- datawizard::center(data$LIFESAT, reference=data$T1_LIFESAT)
+
+model <- lm(RE_LIFESAT_C ~ factor(VSTATUS) * IDENT * T1_LIFESAT_C + factor(VSTATUS) * IDENT * LIFESAT_C, data = data)
+model_summer <- lm(RE_LIFESAT_C ~ factor(VSTATUS) * IDENT * T1_LIFESAT_C + factor(VSTATUS) * IDENT * LIFESAT_C, data = data[data$T1 == "summer",])
+model_winter <- lm(RE_LIFESAT_C ~ factor(VSTATUS) * IDENT * T1_LIFESAT_C + factor(VSTATUS) * IDENT * LIFESAT_C, data = data[data$T1 == "winter",])
+tab_model(model, model_summer, model_winter, pred.labels = c(
+  "T1_LIFESAT_C" = "Past evaluation", 
+  "LIFESAT_C" = "Present evaluation",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1:T1_LIFESAT_C" = "Interaction: Past evaluation x Vaccinated",
+  "IDENT:T1_LIFESAT_C" = "Interaction: Past evaluation x Identification",
+  "factor(VSTATUS)1:IDENT" = "Interaction: Vaccinated x Identification",
+  "factor(VSTATUS)1:LIFESAT_C" = "Interaction: Present evaluation x Vaccinated",
+  "IDENT:LIFESAT_C" = "Interaction: Present evaluation x Identification",
+  "factor(VSTATUS)1:IDENT:T1_LIFESAT_C" = "Interaction: Past evaluation x Vaccinated x Identification",
+  "factor(VSTATUS)1:IDENT:LIFESAT_C" = "Interaction: Present evaluation x Vaccinated x Identification"
+), dv.labels = c("All", "Summer 2020", "Winter 2020/2021"), title = "Recall of life satistfaction", show.std=TRUE, show.se = TRUE)
+
+```
+
+# Retrospective evaluation of the pandemic: appropriateness of political action
+
+## Item-wise agreement
+
+```{r fig.width=7, fig.height=7}
+
+recapvariables <- c("RECAP_1", "RECAP_2", "RECAP_3", "RECAP_4", "RECAP_5", "RECAP_6", "RECAP_7", "RECAP_8", "RECAP_9")
+
+long <- melt(data[,c("VSTATUS", recapvariables)], id=c("VSTATUS"))
+long$VSTATUS <- factor(long$VSTATUS, levels = c(0,1), labels = c("Unvaccinated", "Vaccinated"))
+
+ggbarplot(
+  data = long,
+  x = "variable",
+  y = "value",
+  fill = "VSTATUS",
+  add = "mean_ci",
+  color = "#ffffff",
+  add.params = list(color = "black"),
+  position = position_dodge(0.8),
+  order = rev(recapvariables)
+) + scale_x_discrete(
+  name = "",
+  labels = c(
+    "RECAP_1" = tl("The dangers posed by the corona virus were always as great as claimed by politicians and the media", 45),
+    "RECAP_2" = tl("The Corona measures were completely proportionate", 45),
+    "RECAP_3" = tl("Politicians held on to Corona measures for so long to save their own face after initially overreacting", 45),
+    "RECAP_4" = tl("The Corona measures were enacted solely for health protection reasons, there were no other motives", 45),
+    "RECAP_5" = tl("The Corona measures were arbitrary and were intended to accustom people to being bullied and patronized", 45),
+    "RECAP_6" = tl("The Corona measures were a pretext to restrict civil liberties", 45),
+    "RECAP_7" = tl("Vaccination side effects were systematically concealed", 45),
+    "RECAP_8" = tl("Had we had better data, we would have been spared most of the Corona measures", 45),
+    "RECAP_9" = tl("Evidence shows that most Corona measures have not worked", 45)
+  )
+) + scale_y_continuous(
+  name = "Agreement",
+  breaks = c(1:7),
+  expand = c(0,0)
+) + scale_fill_manual(
+  name = "",
+  values = c(
+    "Unvaccinated" = "#FF7000",
+    "Vaccinated" = "#8D9EFF"
+  )
+) + coord_flip(ylim = c(1,7)) 
+
+
+```
+
+## Regression of mean appropriateness ratings on vaccination status and vaccination status identification
+
+**Note:** After inverting items 1,2, and 4, high reliability (alpha = 0.92) allows averaging the items (see above).
+
+```{r}
+
+model <- lm(RECAP ~ IDENT * factor(VSTATUS), data=data)
+tab_model(model, pred.labels = c(
+  "IDENT" = "Vaccination status identification",
+  "factor(VSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "IDENT:factor(VSTATUS)1" = "Interaction: Vaccinated x Identification"
+), dv.labels = c(""), title = "Appropriateness rating", show.std=TRUE, show.se = TRUE) 
+
+model <- lm(RECAP ~ IDENT * VSTATUS, data=data)
+
+
+fig_model <- plot_model(model, type="int") + scale_x_continuous(name = "Vaccination status identification") + scale_y_continuous(name = "Appropriateness rating") + scale_fill_manual(
+  name = "",
+  labels = c(
+    "0" = "Unvaccinated",
+    "1" = "Vaccinated"
+  ),
+  values = c(
+    "0" = "#FF7000",
+    "1" = "#8D9EFF"
+  )
+) + scale_color_manual(
+  name = "",
+  labels = c(
+    "0" = "Unvaccinated",
+    "1" = "Vaccinated"
+  ),
+  values = c(
+    "0" = "#FF7000",
+    "1" = "#8D9EFF"
+  )
+) + ggtitle(label = "") + theme_classic() + coord_cartesian(ylim = c(1,7), expand = 0) + theme(legend.position = "top")
+
+png("xd_fig_1.png",height=13,width=13,units="cm",res=300)
+print(fig_model)
+dev.off()
+
+```
+
+# Recall (individual model)
+
+```{r}
+
+long <- melt(data[,c("ID", t1variables, revariables, variables)], id=c("ID"))
+
+long$TYPE <- ifelse(str_detect(long$variable, "RE_"), "RECALL", ifelse(str_detect(long$variable, "T1_"), "TRUTH", "BIAS"))
+
+long$VAR <- ifelse(long$TYPE != "BIAS", substring(long$variable, 4), substring(long$variable, 1))
+
+# pomp values since some are 5-point items and some are 7-point
+long$VALUE_POMP <- ifelse(long$VAR == "USE_MASK", (long$value-1)/4, (long$value-1)/6)
+
+# reverse exaggeration perception as these are negatively correlated with the other variables
+long$VALUE_POMP <- ifelse(long$VAR == "EXAGG", 1-long$VALUE_POMP, long$VALUE_POMP) 
+
+# remove life satisfaction and trust in RKI as this is merely correlated with the other variables
+long <- long[long$VAR != "LIFESAT",]
+long <- long[long$VAR != "TRUST_RKI",]
+
+# long to wide
+wide <- dcast(long, VAR+ID ~ TYPE, value.var = "VALUE_POMP")
+
+### truth centering by individual
+tb <- wide %>% group_by(ID) %>% plyr::summarize(
+  ID = ID,
+  RECALL_C = datawizard::center(RECALL, reference=TRUTH),
+  BIAS_C = datawizard::center(BIAS, reference=TRUTH),
+  TRUTH_C = datawizard::center(TRUTH, reference=TRUTH)
+)
+
+### regression by individual
+regs <- tb %>% group_by(ID) %>% do(MODEL = lm(RECALL_C ~ BIAS_C + TRUTH_C, data = .))
+regs <- regs %>% rowwise() %>% mutate(
+  DIRECTIONAL_BIAS = MODEL$coefficients[1],
+  BIAS_FORCE = MODEL$coefficients[2],
+  TRUTH_FORCE = MODEL$coefficients[3]
+) %>% select(-MODEL)
+
+### sometimes no model can be fitted (if all ratings are the same) -> these cases are removed here
+regs <- regs[!is.na(regs$DIRECTIONAL_BIAS) & !is.na(regs$BIAS_FORCE) & !is.na(regs$TRUTH_FORCE),]
+
+### merge regression results into main data
+data <- merge(data, regs, by="ID", all.x = TRUE)
+
+```
+
+## Correlations of model parameters with appropriateness ratings
+
+```{r}
+
+cor.test(data$DIRECTIONAL_BIAS, data$RECAP)
+cor.test(data$TRUTH_FORCE, data$RECAP)
+cor.test(data$BIAS_FORCE, data$RECAP)
+
+```
+
+# Validation of population recall variables
+
+```{r}
+data$RE_POP_SEVERITY <- ifelse(data$T1 == "summer", data$POP_SEVERITY_SUMMER, data$POP_SEVERITY_WINTER)
+
+data$RE_POP_TRUST <- ifelse(data$T1 == "summer", data$POP_TRUST_SUMMER, data$POP_TRUST_WINTER)
+
+data$RE_POP_TRUST_RE <- 100 - data$RE_POP_TRUST # trust is reversed coded in the population estimate
+
+data$RE_POP_EXAGG <- ifelse(data$T1 == "summer", data$POP_EXAGG_SUMMER, data$POP_EXAGG_WINTER)
+
+data$RE_POP_LIFESAT <- ifelse(data$T1 == "summer", data$POP_LIFESAT_SUMMER, data$POP_LIFESAT_WINTER)
+
+###
+```
+
+## Severity
+
+```{r}
+reg_1 <- lm(RE_POP_SEVERITY ~ RE_SEVERITY + SEVERITY + T1_SEVERITY  ,data = data)
+
+tab_model(reg_1, pred.labels = c(
+  "RE_SEVERITY" = "Individual Recall", 
+   "SEVERITY" = "Present evaluation", 
+   "T1_SEVERITY" = "Past valuation")
+, show.std=TRUE, dv.labels = "Population estimate of past severity of infection", show.se = TRUE)
+
+```
+
+## Trust in Goverment
+
+```{r}
+reg_2 <- lm(RE_POP_TRUST_RE ~ RE_TRUST_GOV + TRUST_GOV + T1_TRUST_GOV,data = data  )
+
+tab_model(reg_2, pred.labels = c(
+  "RE_TRUST_GOV" = "Individual Recall", 
+   "TRUST_GOV" = "Present evaluation", 
+   "T1_TRUST_GOV" = "Past valuation")
+, show.std=TRUE, dv.labels = "Population estimate of past trust in government", show.se = TRUE)
+```
+
+## Exaggeration perceptions
+
+```{r}
+reg_3 <- lm(RE_POP_EXAGG ~ RE_EXAGG + EXAGG + T1_EXAGG ,data = data )
+
+tab_model(reg_3, pred.labels = c(
+  "RE_EXAGG" = "Individual Recall", 
+   "EXAGG" = "Present evaluation", 
+   "T1_EXAGG" = "Past valuation")
+, show.std=TRUE, dv.labels = "Population estimate of past exaggeration perceptions", show.se = TRUE)
+
+```
+
+## Life satisfaction
+
+```{r}
+reg_4 <- lm(RE_POP_LIFESAT ~ RE_LIFESAT + LIFESAT + T1_LIFESAT ,data = data )
+
+tab_model(reg_4, pred.labels = c(
+  "RE_LIFESAT" = "Individual Recall", 
+   "LIFESAT" = "Present evaluation", 
+   "T1_LIFESAT" = "Past valuation")
+, show.std=TRUE, dv.labels = "Population estimate of past life satisfaction", show.se = TRUE)
+
+```

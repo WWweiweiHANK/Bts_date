@@ -1,0 +1,955 @@
+---
+title: "S2 (Supplement Study 2)"
+output:
+  html_document:
+    number_sections: yes
+    self_contained: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+Last update: 10/09/2023
+
+```{r warning=FALSE, message=FALSE, echo=FALSE}
+
+library(dplyr)
+library(ggpubr)
+library(reshape2)
+library(compareGroups)
+library(ggalluvial)
+library(sjPlot)
+library(nnet)
+library(Rmisc)
+library(stringr)
+library(ggplot2)
+
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+# hide code chunks 
+# knitr::opts_chunk$set(echo = FALSE)
+
+tl <- function(text, wrap = 45) {
+  if (wrap == 0) {
+    text
+  } else {
+    text <- gsub(paste('(.{1,', wrap,'})(\\s|$)', sep=""), '\\1\n', text)
+    substr(text,1,nchar(text)-1)
+  }
+}
+
+fig.params <- theme(
+    axis.line.y = element_line(color = "#000000",linetype = "solid"),
+    axis.ticks.y = element_line(color = "#000000", linetype = "solid"),
+    axis.text.y = element_text(color="#000000", size=10, angle=0),
+    axis.title.y = element_text(color="#000000", size=10, angle=90),
+    axis.title.x = element_text(color="#000000", size=10, angle=0),
+    axis.text.x = element_text(color="#000000", size=10, angle=0),
+    axis.ticks.x = element_line(color = "#000000", linetype = "solid"),
+    legend.text = element_text(color="#000000", size=10, angle=0),
+    legend.title = element_text(color="#000000", size=10, angle=0),
+    legend.position = "bottom"
+)
+
+data <- readRDS("data_study_2.RDS")
+
+```
+
+# Variable and scale preparation
+
+## Internal consistency: Appropriateness of political action
+
+```{r}
+
+data$EXPERIENCE_SEVERECASES_R <- ifelse(data$EXPERIENCE_SEVERECASES == 2, 0, 1)
+data$EXPERIENCE_DEATHS_R <- ifelse(data$EXPERIENCE_DEATHS == 2, 0, 1)
+data$FINLOSS_R <- ifelse(data$FINLOSS == 2, 0, 1)
+
+data$CRT_BALL_CORRECT <- ifelse(data$CRT_BALL == 5, 1, 0)
+data$CRT_MACHINES_CORRECT <- ifelse(data$CRT_MACHINES == 5, 1, 0)
+data$CRT_ROSES_CORRECT <- ifelse(data$CRT_ROSES == 47, 1, 0)
+
+data$CRT <- data$CRT_BALL_CORRECT + data$CRT_MACHINES_CORRECT + data$CRT_ROSES_CORRECT
+
+data$RECAP_1_R <- 8 - data$RECAP_1
+data$RECAP_2_R <- 8 - data$RECAP_2
+data$RECAP_4_R <- 8 - data$RECAP_4
+psych::alpha(data[,c("RECAP_1_R", "RECAP_2_R", "RECAP_3", "RECAP_4_R", "RECAP_5", "RECAP_6", "RECAP_7", "RECAP_8", "RECAP_9")], check.keys = TRUE)
+data$RECAP <- 8-rowMeans(data[,c("RECAP_1_R", "RECAP_2_R", "RECAP_3", "RECAP_4_R", "RECAP_5", "RECAP_6", "RECAP_7", "RECAP_8", "RECAP_9")], na.rm=TRUE)
+
+#psych::alpha(data[,c("T1_IDENT_NOVAC_1", "T1_IDENT_NOVAC_2", "T1_IDENT_NOVAC_3", "T1_IDENT_NOVAC_4", "T1_IDENT_NOVAC_5")])
+#psych::alpha(data[,c("IDENT_NOVAC_1", "IDENT_NOVAC_2", "IDENT_NOVAC_3", "IDENT_NOVAC_4", "IDENT_NOVAC_5")])
+#psych::alpha(data[,c("T1_IDENT_VAC_1", "T1_IDENT_VAC_2", "T1_IDENT_VAC_3", "T1_IDENT_VAC_4", "T1_IDENT_VAC_5")])
+#psych::alpha(data[,c("IDENT_VAC_1", "IDENT_VAC_2", "IDENT_VAC_3", "IDENT_VAC_4", "IDENT_VAC_5")])
+
+data$T1_IDENT <- rowMeans(data[,c("T1_IDENT_NOVAC_1", "T1_IDENT_NOVAC_2", "T1_IDENT_NOVAC_3", "T1_IDENT_NOVAC_4", "T1_IDENT_NOVAC_5", "T1_IDENT_VAC_1", "T1_IDENT_VAC_2", "T1_IDENT_VAC_3", "T1_IDENT_VAC_4", "T1_IDENT_VAC_5")], na.rm = TRUE)
+data$IDENT <- rowMeans(data[,c("IDENT_NOVAC_1", "IDENT_NOVAC_2", "IDENT_NOVAC_3", "IDENT_NOVAC_4", "IDENT_NOVAC_5", "IDENT_VAC_1", "IDENT_VAC_2", "IDENT_VAC_3", "IDENT_VAC_4", "IDENT_VAC_5")], na.rm = TRUE)
+
+data$IDENT_1 <- ifelse(!is.na(data$IDENT_VAC_1),data$IDENT_VAC_1,data$IDENT_NOVAC_1)
+data$IDENT_2 <- ifelse(!is.na(data$IDENT_VAC_2),data$IDENT_VAC_2,data$IDENT_NOVAC_2)
+data$IDENT_3 <- ifelse(!is.na(data$IDENT_VAC_3),data$IDENT_VAC_3,data$IDENT_NOVAC_3)
+data$IDENT_4 <- ifelse(!is.na(data$IDENT_VAC_4),data$IDENT_VAC_4,data$IDENT_NOVAC_4)
+data$IDENT_5 <- ifelse(!is.na(data$IDENT_VAC_5),data$IDENT_VAC_5,data$IDENT_NOVAC_5)
+
+result_alpha_VSI  <- psych::alpha(data[c("IDENT_1", "IDENT_2", "IDENT_3", "IDENT_4", "IDENT_5")])
+result_alpha_VSI$total
+
+data$CONDITION <- ifelse(data$c_0001 == 1, "control", ifelse(data$c_0001 == 2, "incentive", "feedback"))
+
+```
+
+
+# Descriptives
+
+## Demographics
+
+### Age
+
+```{r}
+
+psych::describe(data$AGE)
+
+```
+### Gender
+
+```{r}
+
+prop.table(table(data$GENDER))
+
+```
+
+### Comparison by vaccination status
+
+Age, gender and vaccination status identification by vaccination status:
+
+```{r}
+
+data$VSTATUS_NAMED <- factor(data$VACSTATUS, levels = c(0, 1), labels = c("Unvaccinated", "Vaccinated"))
+comparisons <-compareGroups::compareGroups(VSTATUS_NAMED ~ T1_AGE + T1_GENDER + IDENT, data = data)
+compareGroups::createTable(comparisons, show.all=TRUE)
+
+```
+
+# Recall (population model)
+
+```{r}
+
+data$RE_PROB <- rowMeans(data[,c("PROB_WINTER_AT", "PROB_WINTER_DE")], na.rm=TRUE)
+data$BIAS_PROB <- data$RE_PROB - data$T1_PROB 
+data$BIAS_STD_PROB <- data$BIAS_PROB/sd(data$BIAS_PROB, na.rm = TRUE)
+
+data$RE_SEVERITY <- data$SEVERITY_WINTER
+data$BIAS_SEVERITY <- data$RE_SEVERITY - data$T1_SEVERITY
+data$BIAS_STD_SEVERITY <- data$BIAS_SEVERITY/sd(data$BIAS_SEVERITY, na.rm = TRUE)
+
+data$RE_TRUST_GOV <- data$TRUST_GOV_WINTER
+data$BIAS_TRUST_GOV <- data$RE_TRUST_GOV - data$T1_TRUST_GOV
+data$BIAS_STD_TRUST_GOV <- data$BIAS_TRUST_GOV/sd(data$BIAS_TRUST_GOV, na.rm = TRUE)
+
+data$RE_TRUST_SCIENCE <- data$TRUST_SCIENCE_WINTER
+data$BIAS_TRUST_SCIENCE <- data$RE_TRUST_SCIENCE - data$T1_TRUST_SCIENCE
+data$BIAS_STD_TRUST_SCIENCE <- data$BIAS_TRUST_SCIENCE/sd(data$BIAS_TRUST_SCIENCE, na.rm = TRUE)
+
+data$RE_USE_MASK <- data$USE_MASK_WINTER
+data$BIAS_USE_MASK <- data$RE_USE_MASK - data$T1_USE_MASK
+data$BIAS_STD_USE_MASK <- data$BIAS_USE_MASK/sd(data$BIAS_USE_MASK, na.rm = TRUE)
+
+data$RE_USE_AVOIDCONTACTS <- data$USE_AVOIDCONTACTS_WINTER
+data$BIAS_USE_AVOIDCONTACTS <- data$RE_USE_AVOIDCONTACTS - data$T1_USE_AVOIDCONTACTS
+data$BIAS_STD_AVOIDCONTACTS <- data$BIAS_USE_AVOIDCONTACTS/sd(data$BIAS_USE_AVOIDCONTACTS, na.rm = TRUE)
+
+variables <- c("PROB", "SEVERITY", "TRUST_GOV", "TRUST_SCIENCE", "USE_MASK", "USE_AVOIDCONTACTS")
+variables.names <- c(
+    "PROB" = "Infection probability",
+    "SEVERITY" = "Infection severity",
+    "TRUST_GOV" = "Trust in government",
+    "TRUST_SCIENCE" = "Trust in science",
+    "USE_MASK" = "Mask wearing",
+    "USE_AVOIDCONTACTS" = "Avoiding contacts"
+)
+
+t1variables <- paste0("T1_", variables)
+t1variables.names <- variables.names
+names(t1variables.names) <- paste0("T1_", names(t1variables.names))
+
+revariables <- paste0("RE_", variables)
+revariables.names <- variables.names
+names(revariables.names) <- paste0("RE_", names(revariables.names))
+
+biasvariables <- paste0("BIAS_", variables)
+biasvariables.names <- variables.names
+names(biasvariables.names) <- paste0("BIAS_", names(biasvariables.names))
+
+stdbiasvariables <- paste0("BIAS_STD_", variables)
+stdbiasvariables.names <- variables.names
+names(stdbiasvariables.names) <- paste0("BIAS_STD_", names(stdbiasvariables.names))
+
+```
+
+## Visualization
+
+```{r fig.width=9, fig.height=6}
+
+getLineParams <- function(p1, p2) {
+  m = (p1[2]-p2[2])/(p1[1]-p2[1])
+  n = p1[2] - m * p1[1]
+  return(c(m,n))
+}
+
+plotcounter = 0
+chars = c("A", "B", "C", "D", "E", "F")
+
+plotModeratedTBM <- function(variable) {
+  
+  plotcounter <<- plotcounter + 1;
+  
+  truthVar <- paste0("T1_", variable)
+  biasVar <- variable
+  recallVar <- paste0("RE_", variable)
+  min <- 1
+  max <- max(dataset[variable])
+  mid <- min + (max-min)/2
+  
+  plotdata <- as.data.frame(expand.grid(c(((min*100):(max*100)))/100, c((min*100):(max*100))/100, c("control","incentive","feedback"), c(0,1)))
+  names(plotdata) <- c(truthVar, biasVar, "CONDITION", "VACSTATUS")
+  plotdata$RECALL <- pmax(pmin(predict(lm(formula=paste(recallVar, "~", truthVar, "*VACSTATUS*CONDITION +", biasVar,"*VACSTATUS*CONDITION"), data = dataset), plotdata), max), min)
+  names(plotdata) <- c("TRUTH", "BIAS", "CONDITION", "VACSTATUS", "RECALL")
+
+  lines <- data.frame(
+    VACSTATUS = numeric(),
+    CONDITION = character(),
+    NAME = character(),
+    M = numeric(),
+    N = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  for (v in c(0,1)) {
+  for (condition in unique(plotdata$CONDITION)) {
+    
+    subset <- plotdata[plotdata$CONDITION == condition & plotdata$VACSTATUS == v,]
+    
+    p1_left <- as.numeric(subset %>% filter(TRUTH == min) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    p1_top <- as.numeric(subset %>% filter(BIAS == max) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    if(abs(p1_left[3]-mid) < abs(p1_top[3]-mid)) {
+      p1 <- p1_left
+    } else {
+      p1 <- p1_top
+    }
+  
+    p2_right <- as.numeric(subset %>% filter(TRUTH == max) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    p2_bottom <- as.numeric(subset %>% filter(BIAS == min) %>% filter(abs(RECALL-mid)==min(abs(RECALL-mid))) %>% select(TRUTH, BIAS, RECALL))
+    if(abs(p2_right[3]-mid) < abs(p2_bottom[3]-mid)) {
+      p2 <- p2_right
+    } else {
+      p2 <- p2_bottom
+    }
+    
+    lines[nrow(lines)+1,] <- list(v, condition, "MEAN", getLineParams(p1, p2)[1], getLineParams(p1, p2)[2])
+    
+  }
+  }
+  
+  
+    
+  ggplot(data=plotdata, aes(TRUTH, BIAS, z = RECALL)) +
+    geom_raster(aes(fill = RECALL)) +
+    theme_minimal() + scale_fill_gradientn(
+      guide = "none",
+      name = "Recall (Jan 23)",
+      breaks = c(min,max),
+      limits = c(min,max),
+      labels = c("1", "7"),
+      colours = c("#FFFFFF", "#FFFFFF", "#FFFFFF")
+    ) + scale_x_continuous(
+      name = ifelse(plotcounter %in% c(4,5,6), "Past rating", ""),
+      breaks = c(min:max)
+    ) + scale_y_continuous(
+      name = ifelse(plotcounter %in% c(1,4), "Present rating", ""),
+      breaks = c(min:max)
+    ) + theme(
+      panel.grid = element_blank(),
+      panel.border = element_rect(colour = "black", fill=NA, size=0.4),
+      axis.ticks.x = element_line(color = "#000000", linetype = "solid", size=0.25),
+      axis.ticks.y = element_line(color = "#000000", linetype = "solid", size=0.25),
+      strip.text = element_text(color="#000000", size=10, angle=0),
+      axis.text.y = element_text(color="#000000", size=10, angle=0),
+      axis.title.y = element_text(color="#000000", size=10, angle=90),
+      axis.title.x = element_text(color="#000000", size=10, angle=0),
+      axis.text.x = element_text(color="#000000", size=10, angle=0),
+      plot.title = element_text(color="#000000", size=10, angle=0, face="bold"),
+      legend.text = element_text(color="#000000", size=10, angle=0),
+      legend.title = element_text(color="#000000", size=10, angle=0),
+      legend.position = "bottom"
+    ) + coord_fixed(
+      ratio=1, 
+      expand = 0
+    ) + geom_hline(
+      yintercept = mid, 
+      size = 0.2
+    ) + geom_vline(
+      xintercept = mid, 
+      size = 0.2
+    ) + geom_abline(
+      data=lines, 
+      aes(slope=M, intercept=N, linetype=CONDITION, color=factor(VACSTATUS)), 
+      size=0.6
+    ) + scale_linetype_manual(
+      name = "",
+      labels = c(
+        "incentive" = "Incentive",
+        "feedback" = "Information",
+        "control" = "Control condition"
+      ),
+      values = c(
+        "incentive" = "solid",
+        "feedback" = "dashed",
+        "control" = "dotted"
+      )
+    ) + scale_color_manual(
+      name = "Recall (at scale midpoint) for   ",
+      labels = c(
+        "0" = "Unvaccinated",
+        "1" = "Vaccinated"
+      ),
+      values = c(
+        "0" = "#FF7000",
+        "1" = "#8D9EFF"
+      )
+    ) + ggtitle(
+      paste0("(", chars[plotcounter], ") ", variables.names[variable])
+    ) + guides(linetype=guide_legend(nrow=1,byrow=TRUE))
+  
+}
+
+# All participants
+dataset = data
+plotlist <- purrr::map(variables, plotModeratedTBM)
+fig2 <- ggarrange(plotlist = plotlist, common.legend = TRUE, legend = "bottom")
+
+fig2
+
+#png("fig_2.png",height=16,width=22,units="cm",res=300)
+#print(fig2)
+#dev.off()
+
+#pdf("fig_2.pdf",height=6,width=10)
+#print(fig2)
+#dev.off()
+
+```
+
+## Regression tables 
+
+See first columns for preregistered hypotheses H1/H2 tests.
+
+```{r}
+
+col_labels <- c("Reported model", "Preregistered model")
+
+col_labels_split <- c("Only vaccinated", "Only unvaccinated")
+
+```
+
+### Infection probability
+
+```{r}
+
+data$RE_PROB_C <- datawizard::center(data$RE_PROB, reference=data$T1_PROB)
+data$T1_PROB_C <- datawizard::center(data$T1_PROB, reference=data$T1_PROB)
+data$PROB_C <- datawizard::center(data$PROB, reference=data$T1_PROB)
+
+model_1 <- lm(RE_PROB_C ~ T1_PROB_C * CONDITION + PROB_C * CONDITION, data = data)
+model_2 <- lm(RE_PROB_C ~ T1_PROB_C * CONDITION * factor(VACSTATUS) + PROB_C * CONDITION * factor(VACSTATUS), data = data)
+
+tab_model(model_2,model_1,title = "Recall of infection probability",dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "T1_PROB_C" = "Past evaluation", 
+  "PROB_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_PROB_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_PROB_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:PROB_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:PROB_C" = "Interaction: Present evaluation x Incentive",
+  "T1_PROB_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:PROB_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_PROB_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_PROB_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:PROB_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:PROB_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+#bayestestR::equivalence_test(model_1)
+bayestestR::equivalence_test(model_2)
+
+data_vac <- subset(data, data$VACSTATUS == 1)
+data_novac <- subset(data, data$VACSTATUS == 0)
+
+model_1 <- lm(RE_PROB_C ~ T1_PROB_C * CONDITION + PROB_C * CONDITION, data = data_vac)
+model_2 <- lm(RE_PROB_C ~ T1_PROB_C * CONDITION + PROB_C * CONDITION, data = data_novac)
+
+tab_model(model_1,model_2,title = "Recall of infection probability",dv.labels = col_labels_split, show.se = TRUE, pred.labels = c(
+  "T1_PROB_C" = "Past evaluation", 
+  "PROB_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_PROB_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_PROB_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:PROB_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:PROB_C" = "Interaction: Present evaluation x Incentive",
+  "T1_PROB_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:PROB_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_PROB_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_PROB_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:PROB_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:PROB_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+```
+
+### Infection severity
+
+```{r}
+
+data$RE_SEVERITY_C <- datawizard::center(data$RE_SEVERITY, reference=data$T1_SEVERITY)
+data$T1_SEVERITY_C <- datawizard::center(data$T1_SEVERITY, reference=data$T1_SEVERITY)
+data$SEVERITY_C <- datawizard::center(data$SEVERITY, reference=data$T1_SEVERITY)
+
+model_1 <- lm(RE_SEVERITY_C ~ T1_SEVERITY_C * CONDITION + SEVERITY_C * CONDITION, data = data)
+model_2 <- lm(RE_SEVERITY_C ~ T1_SEVERITY_C * CONDITION * factor(VACSTATUS) + SEVERITY_C * CONDITION * factor(VACSTATUS), data = data)
+
+tab_model(model_2,model_1, title = "Recall of infection severity",  dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "T1_SEVERITY_C" = "Past evaluation", 
+  "SEVERITY_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_SEVERITY_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_SEVERITY_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:SEVERITY_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:SEVERITY_C" = "Interaction: Present evaluation x Incentive",
+  "T1_SEVERITY_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:SEVERITY_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_SEVERITY_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_SEVERITY_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:SEVERITY_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:SEVERITY_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+#bayestestR::equivalence_test(model_1)
+bayestestR::equivalence_test(model_2)
+
+data_vac <- subset(data, data$VACSTATUS == 1)
+data_novac <- subset(data, data$VACSTATUS == 0)
+
+model_1 <- lm(RE_SEVERITY_C ~ T1_SEVERITY_C * CONDITION + SEVERITY_C * CONDITION, data = data_vac)
+model_2 <- lm(RE_SEVERITY_C ~ T1_SEVERITY_C * CONDITION + SEVERITY_C * CONDITION,  data = data_novac)
+
+tab_model(model_1, model_2, title = "Recall of infection severity",  dv.labels = col_labels_split, show.se = TRUE, pred.labels = c(
+  "T1_SEVERITY_C" = "Past evaluation", 
+  "SEVERITY_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_SEVERITY_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_SEVERITY_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:SEVERITY_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:SEVERITY_C" = "Interaction: Present evaluation x Incentive",
+  "T1_SEVERITY_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:SEVERITY_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_SEVERITY_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_SEVERITY_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:SEVERITY_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:SEVERITY_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+```
+
+### Trust in government
+
+```{r}
+
+data$RE_TRUST_GOV_C <- datawizard::center(data$RE_TRUST_GOV, reference=data$T1_TRUST_GOV)
+data$T1_TRUST_GOV_C <- datawizard::center(data$T1_TRUST_GOV, reference=data$T1_TRUST_GOV)
+data$TRUST_GOV_C <- datawizard::center(data$TRUST_GOV, reference=data$T1_TRUST_GOV)
+
+model_1 <- lm(RE_TRUST_GOV_C ~ T1_TRUST_GOV_C * CONDITION + TRUST_GOV_C * CONDITION, data = data)
+model_2 <- lm(RE_TRUST_GOV_C ~ T1_TRUST_GOV_C * CONDITION * factor(VACSTATUS) + TRUST_GOV_C * CONDITION * factor(VACSTATUS), data = data)
+
+tab_model(model_2,model_1,title = "Recall of trust in government",dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "T1_TRUST_GOV_C" = "Past evaluation", 
+  "TRUST_GOV_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_TRUST_GOV_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_TRUST_GOV_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:TRUST_GOV_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:TRUST_GOV_C" = "Interaction: Present evaluation x Incentive",
+  "T1_TRUST_GOV_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:TRUST_GOV_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_TRUST_GOV_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_TRUST_GOV_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:TRUST_GOV_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:TRUST_GOV_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+#bayestestR::equivalence_test(model_1)
+bayestestR::equivalence_test(model_2)
+
+data_vac <- subset(data, data$VACSTATUS == 1)
+data_novac <- subset(data, data$VACSTATUS == 0)
+
+model_1 <- lm(RE_TRUST_GOV_C ~ T1_TRUST_GOV_C * CONDITION + TRUST_GOV_C * CONDITION, data = data_vac)
+model_2 <- lm(RE_TRUST_GOV_C ~ T1_TRUST_GOV_C * CONDITION + TRUST_GOV_C * CONDITION, data = data_novac)
+
+tab_model(model_1,model_2,title = "Recall of trust in government",dv.labels = col_labels_split, show.se = TRUE, pred.labels = c(
+  "T1_TRUST_GOV_C" = "Past evaluation", 
+  "TRUST_GOV_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_TRUST_GOV_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_TRUST_GOV_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:TRUST_GOV_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:TRUST_GOV_C" = "Interaction: Present evaluation x Incentive",
+  "T1_TRUST_GOV_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:TRUST_GOV_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_TRUST_GOV_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_TRUST_GOV_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:TRUST_GOV_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:TRUST_GOV_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+```
+
+### Trust in science
+
+```{r}
+
+data$RE_TRUST_SCIENCE_C <- datawizard::center(data$RE_TRUST_SCIENCE, reference=data$T1_TRUST_SCIENCE)
+data$T1_TRUST_SCIENCE_C <- datawizard::center(data$T1_TRUST_SCIENCE, reference=data$T1_TRUST_SCIENCE)
+data$TRUST_SCIENCE_C <- datawizard::center(data$TRUST_SCIENCE, reference=data$T1_TRUST_SCIENCE)
+
+model_1 <- lm(RE_TRUST_SCIENCE_C ~ T1_TRUST_SCIENCE_C * CONDITION + TRUST_SCIENCE_C * CONDITION, data = data)
+model_2 <- lm(RE_TRUST_SCIENCE_C ~ T1_TRUST_SCIENCE_C * CONDITION * factor(VACSTATUS) + TRUST_SCIENCE_C * CONDITION * factor(VACSTATUS), data = data)
+
+tab_model(model_2,model_1,title = "Recall of trust in science", dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "T1_TRUST_SCIENCE_C" = "Past evaluation", 
+  "TRUST_SCIENCE_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_TRUST_SCIENCE_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_TRUST_SCIENCE_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Incentive",
+  "T1_TRUST_SCIENCE_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_TRUST_SCIENCE_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_TRUST_SCIENCE_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+#bayestestR::equivalence_test(model_1)
+bayestestR::equivalence_test(model_2)
+
+data_vac <- subset(data, data$VACSTATUS == 1)
+data_novac <- subset(data, data$VACSTATUS == 0)
+
+model_1 <- lm(RE_TRUST_SCIENCE_C ~ T1_TRUST_SCIENCE_C * CONDITION + TRUST_SCIENCE_C * CONDITION, data = data_vac)
+model_2 <-  lm(RE_TRUST_SCIENCE_C ~ T1_TRUST_SCIENCE_C * CONDITION + TRUST_SCIENCE_C * CONDITION, data = data_novac)
+
+tab_model(model_1,model_2,title = "Recall of trust in science", dv.labels = col_labels_split, show.se = TRUE, pred.labels = c(
+  "T1_TRUST_SCIENCE_C" = "Past evaluation", 
+  "TRUST_SCIENCE_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_TRUST_SCIENCE_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_TRUST_SCIENCE_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Incentive",
+  "T1_TRUST_SCIENCE_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_TRUST_SCIENCE_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_TRUST_SCIENCE_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:TRUST_SCIENCE_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+
+```
+
+### Mask wearing
+
+```{r}
+
+data$RE_USE_MASK_C <- datawizard::center(data$RE_USE_MASK, reference=data$T1_USE_MASK)
+data$T1_USE_MASK_C <- datawizard::center(data$T1_USE_MASK, reference=data$T1_USE_MASK)
+data$USE_MASK_C <- datawizard::center(data$USE_MASK, reference=data$T1_USE_MASK)
+
+model_1 <- lm(RE_USE_MASK_C ~ T1_USE_MASK_C * CONDITION + USE_MASK_C * CONDITION, data = data)
+model_2 <- lm(RE_USE_MASK_C ~ T1_USE_MASK_C * CONDITION * factor(VACSTATUS) + USE_MASK_C * CONDITION * factor(VACSTATUS), data = data)
+
+tab_model(model_2,model_1,title = "Recall of mask wearing", dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "T1_USE_MASK_C" = "Past evaluation", 
+  "USE_MASK_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_USE_MASK_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_USE_MASK_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:USE_MASK_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:USE_MASK_C" = "Interaction: Present evaluation x Incentive",
+  "T1_USE_MASK_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:USE_MASK_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_USE_MASK_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_USE_MASK_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:USE_MASK_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:USE_MASK_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+#bayestestR::equivalence_test(model_1)
+bayestestR::equivalence_test(model_2)
+
+data_vac <- subset(data, data$VACSTATUS == 1)
+data_novac <- subset(data, data$VACSTATUS == 0)
+
+model_1 <- lm(RE_USE_MASK_C ~ T1_USE_MASK_C * CONDITION + USE_MASK_C * CONDITION, data = data_vac)
+model_2 <- lm(RE_USE_MASK_C ~ T1_USE_MASK_C * CONDITION + USE_MASK_C * CONDITION, data = data_novac)
+
+tab_model(model_1, model_2,title = "Recall of mask wearing", dv.labels = col_labels_split, show.se = TRUE, pred.labels = c(
+  "T1_USE_MASK_C" = "Past evaluation", 
+  "USE_MASK_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_USE_MASK_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_USE_MASK_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:USE_MASK_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:USE_MASK_C" = "Interaction: Present evaluation x Incentive",
+  "T1_USE_MASK_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:USE_MASK_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_USE_MASK_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_USE_MASK_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:USE_MASK_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:USE_MASK_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+```
+
+### Avoiding contacts
+
+```{r}
+
+data$RE_USE_AVOIDCONTACTS_C <- datawizard::center(data$RE_USE_AVOIDCONTACTS, reference=data$T1_USE_AVOIDCONTACTS)
+data$T1_USE_AVOIDCONTACTS_C <- datawizard::center(data$T1_USE_AVOIDCONTACTS, reference=data$T1_USE_AVOIDCONTACTS)
+data$USE_AVOIDCONTACTS_C <- datawizard::center(data$USE_AVOIDCONTACTS, reference=data$T1_USE_AVOIDCONTACTS)
+
+model_1 <- lm(RE_USE_AVOIDCONTACTS_C ~ T1_USE_AVOIDCONTACTS_C * CONDITION + USE_AVOIDCONTACTS_C * CONDITION, data = data)
+model_2 <- lm(RE_USE_AVOIDCONTACTS_C ~ T1_USE_AVOIDCONTACTS_C * CONDITION * factor(VACSTATUS) + USE_AVOIDCONTACTS_C * CONDITION * factor(VACSTATUS), data = data)
+
+tab_model(model_2,model_1,title = "Recall of avoiding contacts",dv.labels = col_labels, show.se = TRUE, pred.labels = c(
+  "T1_USE_AVOIDCONTACTS_C" = "Past evaluation", 
+  "USE_AVOIDCONTACTS_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_USE_AVOIDCONTACTS_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_USE_AVOIDCONTACTS_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Incentive",
+  "T1_USE_AVOIDCONTACTS_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_USE_AVOIDCONTACTS_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_USE_AVOIDCONTACTS_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+#bayestestR::equivalence_test(model_1)
+bayestestR::equivalence_test(model_2)
+
+data_vac <- subset(data, data$VACSTATUS == 1)
+data_novac <- subset(data, data$VACSTATUS == 0)
+
+model_1 <- lm(RE_USE_AVOIDCONTACTS_C ~ T1_USE_AVOIDCONTACTS_C * CONDITION + USE_AVOIDCONTACTS_C * CONDITION, data = data_vac)
+model_2 <- lm(RE_USE_AVOIDCONTACTS_C ~ T1_USE_AVOIDCONTACTS_C * CONDITION + USE_AVOIDCONTACTS_C * CONDITION, data = data_novac)
+
+tab_model(model_1,model_2, title = "Recall of avoiding contacts",dv.labels = col_labels_split, show.se = TRUE, pred.labels = c(
+  "T1_USE_AVOIDCONTACTS_C" = "Past evaluation", 
+  "USE_AVOIDCONTACTS_C" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "T1_USE_AVOIDCONTACTS_C:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "T1_USE_AVOIDCONTACTS_C:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Incentive",
+  "T1_USE_AVOIDCONTACTS_C:factor(VACSTATUS)1" = "Interaction: Past evaluation x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "factor(VACSTATUS)1:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Vaccinated",
+  "T1_USE_AVOIDCONTACTS_C:CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Past evaluation x Information x Vaccinated",
+  "T1_USE_AVOIDCONTACTS_C:CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Past evaluation x Incentive x Vaccinated",
+  "CONDITIONfeedback:factor(VACSTATUS)1:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Information x Vaccinated",
+   "CONDITIONincentive:factor(VACSTATUS)1:USE_AVOIDCONTACTS_C" = "Interaction: Present evaluation x Incentive x Vaccinated"
+))
+
+```
+
+## Mixed effects regression
+
+```{r}
+
+data$ID <- data$p_0001
+
+variables.names <- c(
+    "PROB" = "Infection probability",
+    "SEVERITY" = "Infection severity",
+    "TRUST_GOV" = "Trust in government",
+    "TRUST_SCIENCE" = "Trust in science",
+    "USE_MASK" = "Mask wearing",
+    "USE_AVOIDCONTACTS" = "Avoiding contacts"
+)
+
+t1variables.names <- variables.names
+names(t1variables.names) <- paste0("T1_",names(t1variables.names))
+
+revariables.names <- variables.names
+names(revariables.names) <- paste0("RE_",names(revariables.names))
+
+long <- melt(data[,c("ID", "CONDITION", t1variables, revariables, variables)], id=c("ID", "CONDITION"))
+
+long$TYPE <- ifelse(str_detect(long$variable, "RE_"), "RECALL", ifelse(str_detect(long$variable, "T1_"), "TRUTH", "BIAS"))
+
+long$VAR <- ifelse(long$TYPE != "BIAS", substring(long$variable, 4), substring(long$variable,1))
+
+# long to wide
+wide <- dcast(long, VAR+ID+CONDITION ~ TYPE, value.var = "value", fun.aggregate = mean)
+
+model <- lme4::lmer(RECALL ~ TRUTH * CONDITION + BIAS * CONDITION + (1|ID), data = wide)
+tab_model(model, show.se = TRUE, title = "All variables (mixed effects regression)", dv.labels = "Recall", pred.labels = c(
+  "TRUTH" = "Past evaluation", 
+  "BIAS" = "Present evaluation",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback" = "Experimental condition: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental condition: incentive (Baseline: control)",
+  "TRUTH:CONDITIONfeedback" = "Interaction: Past evaluation x Information",
+  "TRUTH:CONDITIONincentive" = "Interaction: Past evaluation x Incentive",
+  "CONDITIONfeedback:BIAS" = "Interaction: Present evaluation x Information",
+  "CONDITIONincentive:BIAS" = "Interaction: Present evaluation x Incentive"
+))
+
+```
+
+# Retrospective evaluation of the pandemic: appropriateness of political action
+
+## Item-wise agreement
+
+```{r fig.width=7, fig.height=7}
+
+recapvariables <- c("RECAP_1", "RECAP_2", "RECAP_3", "RECAP_4", "RECAP_5", "RECAP_6", "RECAP_7", "RECAP_8", "RECAP_9")
+
+long <- melt(data[,c("VACSTATUS", recapvariables)], id=c("VACSTATUS"))
+long$VACSTATUS <- factor(long$VACSTATUS, levels = c(0,1), labels = c("Unvaccinated", "Vaccinated"))
+
+ggbarplot(
+  data = long,
+  x = "variable",
+  y = "value",
+  fill = "VACSTATUS",
+  add = "mean_ci",
+  color = "#ffffff",
+  add.params = list(color = "black"),
+  position = position_dodge(0.8),
+  order = rev(recapvariables)
+) + scale_x_discrete(
+  name = "",
+  labels = c(
+    "RECAP_1" = tl("The dangers posed by the corona virus were always as great as claimed by politicians and the media", 45),
+    "RECAP_2" = tl("The Corona measures were completely proportionate", 45),
+    "RECAP_3" = tl("Politicians held on to Corona measures for so long to save their own face after initially overreacting", 45),
+    "RECAP_4" = tl("The Corona measures were enacted solely for health protection reasons, there were no other motives", 45),
+    "RECAP_5" = tl("The Corona measures were arbitrary and were intended to accustom people to being bullied and patronized", 45),
+    "RECAP_6" = tl("The Corona measures were a pretext to restrict civil liberties", 45),
+    "RECAP_7" = tl("Vaccination side effects were systematically concealed", 45),
+    "RECAP_8" = tl("Had we had better data, we would have been spared most of the Corona measures", 45),
+    "RECAP_9" = tl("Evidence shows that most Corona measures have not worked", 45)
+  )
+) + scale_y_continuous(
+  name = "Agreement",
+  breaks = c(1:7),
+  expand = c(0,0)
+) + scale_fill_manual(
+  name = "",
+  values = c(
+    "Unvaccinated" = "#FF7000",
+    "Vaccinated" = "#8D9EFF"
+  )
+) + coord_flip(ylim = c(1,7)) 
+
+
+```
+
+## Appropriateness ratings by condition
+
+```{r}
+data$VACSTATUS_F <- factor(data$VACSTATUS, levels = c(0,1), labels = c("Unvaccinated", "Vaccinated"))
+ggbarplot(
+  data = data,
+  x = "CONDITION",
+  y = "RECAP",
+  fill = "VACSTATUS_F",
+  color = "#ffffff",
+  add.params = list(color = "black"),
+  position = position_dodge(0.8),
+  add = "mean_ci"
+) + scale_fill_manual(
+  name = "",
+  values = c(
+    "Unvaccinated" = "#FF7000",
+    "Vaccinated" = "#8D9EFF"
+  )
+) + scale_y_continuous(
+  name = "Appropriateness of political action",
+  breaks = c(1:7),
+  expand = c(0,0)
+) + coord_cartesian(
+  ylim = c(1,7)
+) + scale_x_discrete(
+  name="",
+  labels = c(
+    "control" = "Control",
+    "incentive" = "Incentive",
+    "feedback" = "Information"
+  )
+)
+
+```
+
+Average ratings by vaccination status:
+
+```{r}
+
+comparisons <- compareGroups(VACSTATUS_F ~ RECAP, data = data)
+createTable(comparisons)
+rstatix::cohens_d(data, RECAP ~ VACSTATUS_F)
+
+```
+
+Preregistered hypotheses test (H3/H4):
+
+```{r}
+
+model <- lm(RECAP ~ CONDITION, data=data)
+tab_model(model, pred.labels = c(
+  "CONDITIONfeedback" = "Experimental manipulation: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental manipulation: incentive (Baseline: control)"
+), dv.labels = c("Appropriateness rating"))
+
+bayestestR::equivalence_test(model)
+
+```
+
+Taking into account vaccination status and identification:
+
+```{r}
+
+model <- lm(RECAP ~ CONDITION * IDENT * factor(VACSTATUS), data=data)
+tab_model(model, pred.labels = c(
+  "CONDITIONfeedback" = "Experimental manipulation: information (Baseline: control)",
+  "CONDITIONincentive" = "Experimental manipulation: incentive (Baseline: control)",
+  "IDENT" = "Vaccination status identification",
+  "factor(VACSTATUS)1" = "Vaccinated (Baseline: unvaccinated)",
+  "CONDITIONfeedback:IDENT" = "Interaction: Information x Identification",
+  "CONDITIONincentive:IDENT" = "Interaction: Incentive x Identification",
+  "CONDITIONfeedback:factor(VACSTATUS)1" = "Interaction: Information x Vaccinated",  
+  "CONDITIONincentive:factor(VACSTATUS)1" = "Interaction: Incentive x Vaccinated",
+  "IDENT:factor(VACSTATUS)1" = "Interaction: Identification x Vaccinated",
+  "CONDITIONfeedback:IDENT:factor(VACSTATUS)1" = "Interaction: Information x Identification x Vaccinated",
+  "CONDITIONincentive:IDENT:factor(VACSTATUS)1	" = "Interaction: Incentive x Identification x Vaccinated"
+), dv.labels = c("Appropriateness rating"))
+
+bayestestR::equivalence_test(model)
+#model_bayes <- rstanarm::stan_glm(model)
+#bayestestR::describe_posterior(model_bayes)
+
+```
+
+# Recall (individual model)
+
+```{r}
+
+long <- melt(data[,c("ID", t1variables, revariables, variables)], id=c("ID"))
+
+long$TYPE <- ifelse(str_detect(long$variable, "RE_"), "RECALL", ifelse(str_detect(long$variable, "T1_"), "TRUTH", "BIAS"))
+
+long$VAR <- ifelse(long$TYPE != "BIAS", substring(long$variable, 4), substring(long$variable, 1))
+
+long$VALUE <- long$value
+
+# do not remove or invert variables as all 6 present ratings are positively correlated
+
+# long to wide
+wide <- dcast(long, VAR+ID ~ TYPE, value.var = "VALUE")
+
+### truth centering by individual
+tb <- wide %>% dplyr::group_by(ID) %>% plyr::summarize(
+  ID = ID,
+  RECALL_C = datawizard::center(RECALL, reference=TRUTH),
+  BIAS_C = datawizard::center(BIAS, reference=TRUTH),
+  TRUTH_C = datawizard::center(TRUTH, reference=TRUTH)
+)
+
+### regression by individual
+regs <- tb %>% dplyr::group_by(ID) %>% do(MODEL = lm(RECALL_C ~ BIAS_C + TRUTH_C, data = .))
+regs <- regs %>% rowwise() %>% dplyr::mutate(
+  DIRECTIONAL_BIAS = MODEL$coefficients[1],
+  BIAS_FORCE = MODEL$coefficients[2],
+  TRUTH_FORCE = MODEL$coefficients[3]
+) %>% select(-MODEL)
+
+### sometimes no model can be fitted (if all ratings are the same) -> these cases are removed here
+regs <- regs[!is.na(regs$DIRECTIONAL_BIAS) & !is.na(regs$BIAS_FORCE) & !is.na(regs$TRUTH_FORCE),]
+
+### merge regression results into main data
+data <- merge(data, regs, by="ID", all.x = TRUE)
+
+```
+
+## Correlations of model parameters with appropriateness ratings
+
+```{r}
+
+cor.test(data$DIRECTIONAL_BIAS, data$RECAP)
+cor.test(data$TRUTH_FORCE, data$RECAP)
+cor.test(data$BIAS_FORCE, data$RECAP)
+
+```

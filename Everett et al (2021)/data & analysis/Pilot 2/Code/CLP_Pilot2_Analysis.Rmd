@@ -1,0 +1,497 @@
+---
+title: "COVID-19 Leader Perceptions Pilot 2 (Analyses)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: FALSE
+---
+
+<script>
+$(document).ready(function() {
+  $items = $('div#TOC li');
+  $items.each(function(idx) {
+    num_ul = $(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+
+### Set seed for boxplots
+
+```{r}
+rand_seed = 828
+set.seed(rand_seed)
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(tidy = FALSE, fig.align='left', cache.extra = rand_seed)
+options(knitr.kable.NA = '')
+```
+
+
+***
+
+# Setup
+
+***
+
+## Package Loading
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+
+library(tidyr)
+library(dplyr)
+library(Hmisc)
+library(stringr)
+library(lme4)
+library(lmerTest)
+library(stats)
+library(emmeans)
+library(kableExtra)
+```
+
+
+## Data Loading
+
+```{r}
+# Load in data
+df <- read.csv("../Data/CLP_Pilot2_Data_Long.csv", header=TRUE,
+               stringsAsFactors=FALSE)
+```
+
+## Set Factor Levels
+
+```{r}
+# Get rid of vars we won't use
+df <- select(df, -contains("OUS"), -contains("covid"), -moral, -redcross_reliable,    # Not used
+             -gender, -race, # Recoded
+             -trustOther, -trustworthy) # Composite
+
+# Recode the non-numeric variables
+df$gender_recode <- factor(df$gender_recode, levels=c("Female", "Male", "Other"))
+
+df$race_recode <- factor(df$race_recode, levels=c("Other", "Asian", "Black", "White"))
+
+df <- df %>% mutate_at(c('age', 'education', 'income', 'religiosity', 'pol_ideology', 
+                 'support', 'avg_trust'), as.numeric)
+
+# Capitalize scenarios
+df <- df %>%
+  mutate(dilemma = ifelse(dilemma == "ppe", "PPE", capitalize(dilemma)),
+         dilemma = factor(dilemma, levels = c("Lockdown", "Ventilator", "PPE", "Medicine")))
+
+df <- df %>%
+  mutate(dimension = recode(dimension, "IH" = "Instrumental Harm", 
+                            "IB" = "Impartial Beneficence") ,
+         dimension = factor(dimension, levels = c("Instrumental Harm", "Impartial Beneficence")))
+
+df <- df %>%
+  mutate(argument = factor(argument, levels = c("Utilitarian", "Non-Utilitarian")))
+```
+
+### Check Factor Levels
+```{r}
+# Dimension
+print(unique(df$dimension))
+# Argument
+print(unique(df$argument))
+# Dilemma
+print(unique(df$dilemma))
+```
+
+## Effect coding
+
+```{r}
+df <- mutate(df,
+  argument_recode = recode(argument, "Non-Utilitarian" = -0.5, 
+                            "Utilitarian" = 0.5),
+  dimension_recode = recode(dimension, "Instrumental Harm" = -0.5,
+                            "Impartial Beneficence" = 0.5))
+
+# Check
+df %>%
+  dplyr::select(argument, argument_recode, dimension, dimension_recode) %>%
+  unique() %>%
+  kable(format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") 
+```
+
+Now the "non-utilitarian" condition is coded as -0.5, and the "utilitarian" condition as 0.5.
+Now Instrumental Harm is coded as -0.5, and Impartial Beneficence as 0.5.
+
+## Prepare dvs & scale covariates
+
+```{r}
+df_dems <- df %>% 
+  filter(!is.na(avg_trust)) %>% 
+  ungroup() %>%
+  select(-behav) %>%
+  na.omit() %>%
+  select(subId, gender_recode, age) %>%
+  unique() 
+```
+
+`r length(unique(df_dems$subId))` valid subjects
+
+`r nrow(filter(df_dems, gender_recode == "Female"))` females
+
+Mean age: `r round(mean(df_dems$age), 2)`
+
+### Trust task
+
+```{r}
+df_self <- df %>% 
+  filter(!is.na(avg_trust)) %>% 
+  ungroup() %>%
+  select(-behav) %>%
+  na.omit() %>%
+  # Scale
+  mutate_at(.funs=list(~ scale(., center = TRUE, scale=FALSE) %>% as.vector), 
+            vars(age, education, income, religiosity, pol_ideology, support))
+```
+
+`r length(unique(df_self$subId))` subjects in the self-reported trust task
+
+### Behavioral Task
+
+```{r}
+df_beh <- df %>% 
+  filter(exclude_behav == 0) %>% 
+  filter(!is.na(behav)) %>% 
+  mutate(answer_recode = recode(behav, "Utilitarian" = 1,
+                                "Non-Utilitarian" = 0)) %>%
+  ungroup() %>%
+  select(-avg_trust) %>%
+  na.omit() %>%
+  # Scale
+  mutate_at(.funs=list(~scale(., center = TRUE, scale=FALSE) %>% as.vector), 
+            vars(age, education, income, religiosity, pol_ideology, support))
+```
+
+`r length(unique(df_beh$subId))` subjects in the voting task
+
+## Set Contrasts
+
+```{r}
+# options("contrasts") # View current contrasts
+options(contrasts = c("contr.treatment", "contr.poly")) # Set contrasts
+options("contrasts") # Confirm contrasts
+```
+
+## Plot Setup
+
+```{r}
+colorDic <- c("Non-Utilitarian"='#D98A32', "Utilitarian"='#61AAC5')
+theme_set(theme_test() +
+          theme(legend.position = 'None',
+                panel.border = element_blank(),
+                plot.title = element_text(hjust = 0.5),
+                axis.title = element_text(size = 13, face='bold'),
+                axis.title.x = element_text(margin = margin(10, 0, 0, 0)),
+                axis.title.y = element_text(margin = margin(0, 10, 0, 0)),
+                axis.text.x = element_text(size = 13),
+                axis.line.y = element_line(color='gray20'),
+                axis.ticks = element_blank(),
+                strip.background = element_blank(),
+                strip.text = element_text(face = 'bold', size=12),
+                panel.spacing = unit(1, "lines")))
+```
+
+
+## Self-reported Trust - Main Model
+
+Here we look at the effects of argument type (non-utilitarian vs utilitarian) and dimension type (instrumental harm vs impartial beneficence), and their interaction, including participant demographics and other covariates.
+
+We use modified contrasts and uses mean-centered covariates. The baseline for gender is "Female", and for race is "Other". For argument type, the non-utilitarian is coded as -0.5 and the utilitarian as 0.5. For dimension type, instrumental harm is coded as -0.5, and impartial beneficence as 0.5
+
+```{r}
+
+trust_model <- lmer(avg_trust ~ gender_recode + age + race_recode + education + income 
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1|subId) + (1|dilemma), 
+            data = df_self,
+            REML = TRUE)
+
+model.output <- summary(trust_model)
+model.output <- model.output$coefficients
+model.output <- model.output[-1,]
+rownames(model.output) <- rownames(model.output) %>%
+                                     capitalize() %>%
+                                     gsub("_recode", "", .) %>%
+                                     gsub("Pol_ideology", "Political Ideology", .) %>%
+                                     gsub("support", "Policy Support", .) %>%
+                                     gsub('^(Gender)(.*)$', '\\1 [\\2]', .) %>%
+                                     gsub('^(Race)(.*)$', '\\1 [\\2]', .) %>%
+                                     gsub("Argument:dimension", "Argument x Dimension", .)
+colnames(model.output) <- colnames(model.output) %>%
+                                     gsub("Estimate", "B", .) %>%
+                                     gsub("Std. Error", "SE", .) %>%
+                                     gsub("t value", "t", .) %>%
+                                     gsub("Pr.*", "p", .)
+
+model.output[, c(1,2,4)] <- round(model.output[, c(1,2,4)], digits = 2)
+model.output[, 3] <- round(model.output[, 3], digits = 0)
+model.output[, 5] <- format.pval(model.output[, 5], eps = .001, digits = 3)
+
+kable(model.output, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") %>%
+      pack_rows("Covariates", 1, 11) %>%
+      pack_rows("Main Effects", 12, 13) %>%
+      pack_rows("Interaction", 14, 14)
+```
+
+```{r}
+b <- as.numeric(model.output["Argument", "B"])
+n <- length(unique(df_self$subId))
+se <- as.numeric(model.output["Argument", "SE"])
+d <- b/(se*sqrt(n))
+```
+
+Cohens'd for Argument main effect: `r round(d, 2)` 
+
+```{r}
+b <- as.numeric(model.output["Dimension", "B"])
+n <- length(unique(df_self$subId))
+se <- as.numeric(model.output["Dimension", "SE"])
+d <- b/(se*sqrt(n))
+```
+
+Cohens'd for Dimension main effect: `r round(d, 2)` 
+
+```{r}
+b <- as.numeric(model.output["Argument x Dimension", "B"])
+n <- length(unique(df_self$subId))
+se <- as.numeric(model.output["Argument x Dimension", "SE"])
+d <- b/(se*sqrt(n))
+```
+
+Cohens'd for Argument/Dimension interaction: `r round(d, 2)` 
+
+```{r}
+conf <- confint(trust_model, c("argument_recode", "dimension_recode", "argument_recode:dimension_recode"))
+kable(conf, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") 
+```
+
+```{r}
+em <- emmeans(trust_model,  specs=c("argument_recode", "dimension_recode"), adjust="bonferroni")
+kable(em, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+```{r}
+pairs = pairs(em, adjust="bonferroni", by="dimension_recode", reverse=TRUE)
+kable(pairs, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+```{r}
+kable(confint(pairs), format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+## Self-reported Trust - Figures
+
+```{r}
+
+df_self %>%
+  ggplot(aes(x=argument, y=avg_trust, 
+             color=argument, fill=argument)) + 
+  geom_jitter(alpha=.25, width = .2, height = .1, size=1) +
+  geom_boxplot(alpha=.2, size=.5, outlier.shape = NA) +
+  scale_fill_manual(values = colorDic) +
+  scale_color_manual(values = colorDic) +
+  facet_wrap(~dimension) +
+  xlab('Argument') +
+  ylab('Average Trust in Leader') +
+  scale_y_continuous(breaks = seq(1, 7), limits = c(0.5, 7.5)) +
+  theme() -> p
+
+p
+
+ggsave(plot=p, width = 6, height = 4, device='jpeg',
+       filename="../Plots/CLP_Pilot2_Analysis_Plot.jpeg")
+ggsave(plot=p, width = 6, height = 4, device='pdf',
+       filename="../Plots/CLP_Pilot2_Analysis_Plot.pdf")
+
+df_self %>%
+  ggplot(aes(x=argument, y=avg_trust, 
+             color=argument, fill=argument)) + 
+  geom_jitter(alpha=.25, width = .2, height = .1, size=1) +
+  geom_boxplot(alpha=.2, size=.5, outlier.shape = NA) +
+  scale_fill_manual(values = colorDic) +
+  scale_color_manual(values = colorDic) +
+  facet_wrap(~dimension*dilemma) +
+  xlab('Argument') +
+  ylab('Average Trust in Leader') +
+  scale_y_continuous(breaks = seq(1, 7), limits = c(0.5, 7.5)) -> p
+
+p
+
+ggsave(plot=p, width = 6, height = 6, device='jpeg',
+       filename="../Plots/CLP_Pilot2_Analysis_Plot_byDil.jpeg")
+ggsave(plot=p, width = 6, height = 6, device='pdf',
+       filename="../Plots/CLP_Pilot2_Analysis_Plot_byDil.pdf")
+
+```
+
+***
+## Behavioral Task
+
+Here we look at the effects of dimension type (instrumental harm vs impartial beneficence), on leader choice (non-utilitarian vs utilitarian), including participant demographics and other covariates.
+
+We use modified contrasts and uses mean-centered covariates. The baseline for gender is "Female", and for race is "Other". For argument type, the non-utilitarian is coded as -0.5 and the utilitarian as 0.5. For dimension type, instrumental harm is coded as -0.5, and impartial beneficence as 0.5
+
+```{r}
+beh_model <- glmer(answer_recode ~ gender_recode + age + race_recode + education + income
+               + pol_ideology + religiosity + support
+               + dimension_recode + (1|dilemma),
+               data=df_beh,  family=binomial(link = "logit"))
+
+model.output <- summary(beh_model)
+model.output <- model.output$coefficients
+model.output <- model.output[-1,]
+rownames(model.output) <- rownames(model.output) %>%
+                                     capitalize() %>%
+                                     gsub("_recode", "", .) %>%
+                                     gsub("Pol_ideology", "Political Ideology", .) %>%
+                                     gsub("support", "Policy Support", .) %>%
+                                     gsub('^(Gender)(.*)$', '\\1 [\\2]', .) %>%
+                                     gsub('^(Race)(.*)$', '\\1 [\\2]', .) 
+colnames(model.output) <- colnames(model.output) %>%
+                                     gsub("Estimate", "B", .) %>%
+                                     gsub("Std. Error", "SE", .) %>%
+                                     gsub("z value", "z", .) %>%
+                                     gsub("Pr.*", "p", .)
+
+model.output[, 1:3] <- round(model.output[, 1:3], digits = 2)
+model.output[, 4] <- format.pval(model.output[, 4], eps = .001, digits = 3)
+
+kable(model.output, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") %>%
+pack_rows("Covariates", 1, 11) %>%
+pack_rows("Main Effects", 12, 12)
+```
+
+
+```{r}
+b <- as.numeric(model.output["Dimension", "B"])
+or <- exp(b)
+d <- log(or)*sqrt(3)/pi
+```
+
+Odds ratio: `r round(or, 2)`
+
+Cohens'd for Dimension main effect: `r round(d, 2)` 
+
+```{r}
+conf <- confint(beh_model, "dimension_recode")
+kable(conf, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+
+```
+
+```{r}
+em <- emmeans(beh_model,  specs=c("dimension_recode"), 
+              adjust="bonferroni", type = "response")
+kable(em, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+To make sure the singularity is not an issue, check a simplified model:
+
+```{r}
+beh_model <- glm(answer_recode ~ gender_recode + age + race_recode + education + income
+               + pol_ideology + religiosity + support
+               + dimension_recode,
+               data=df_beh,  family=binomial(link = "logit"))
+
+model.output <- summary(beh_model)
+model.output <- model.output$coefficients
+model.output <- model.output[-1,]
+rownames(model.output) <- rownames(model.output) %>%
+                                     capitalize() %>%
+                                     gsub("_recode", "", .) %>%
+                                     gsub("Pol_ideology", "Political Ideology", .) %>%
+                                     gsub("support", "Policy Support", .) %>%
+                                     gsub('^(Gender)(.*)$', '\\1 [\\2]', .) %>%
+                                     gsub('^(Race)(.*)$', '\\1 [\\2]', .) 
+colnames(model.output) <- colnames(model.output) %>%
+                                     gsub("Estimate", "B", .) %>%
+                                     gsub("Std. Error", "SE", .) %>%
+                                     gsub("z value", "z", .) %>%
+                                     gsub("Pr.*", "p", .)
+
+model.output[, 1:3] <- round(model.output[, 1:3], digits = 2)
+model.output[, 4] <- format.pval(model.output[, 4], eps = .001, digits = 3)
+
+kable(model.output, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") %>%
+pack_rows("Covariates", 1, 11) %>%
+pack_rows("Main Effects", 12, 12)
+```
+
+## Behavioral Task - Figure
+
+```{r}
+summary(em) %>%
+  mutate(`Non-Utilitarian`=1-prob, `Utilitarian`=prob) %>%
+  gather(Argument, perc, -(dimension_recode:asymp.UCL)) %>%
+  mutate(perc = perc*100,
+         se_perc = SE*100,
+            dimension = recode(dimension_recode, `-0.5` = "Instrumental Harm",
+                                       `0.5` = "Impartial Beneficence"),
+            dimension = factor(str_replace(dimension, " ", "\n"),
+                                      levels=c("Instrumental\nHarm", "Impartial\nBeneficence")), 
+            lab_ypos = recode(Argument, 'Utilitarian' = 4, 'Non-Utilitarian' = 80)) -> df_beh_plot
+
+df_beh_plot %>%
+  ggplot(aes(x=dimension, y=perc, fill=Argument)) +
+  geom_bar(stat="identity", color='black', 
+           width = .7) +
+  geom_errorbar(data=filter(select(df_beh_plot, Argument, dimension, perc, se_perc), Argument=="Utilitarian"), 
+                    aes(ymin=perc-se_perc, ymax=perc+se_perc), width = 0.15) +
+  scale_fill_manual(values = colorDic)  +
+  theme(axis.ticks.y = element_blank()) +
+  xlab('Dimension') +
+  ylab('% Chosen') +
+  scale_y_continuous(breaks = seq(0, 100, 10), limits = c(0, 100)) +
+  coord_cartesian(clip = 'off') +
+  geom_hline(yintercept = 0, color = 'gray20') +
+  geom_text(aes(x = 1.5, y = Inf, label ="Non-Utilitarian Leader", 
+                 vjust=-1.5, size=4, fontface =2), color=colorDic[1]) +
+  geom_text(aes(x = 1.5, y = Inf, label ="Utilitarian Leader", 
+                 vjust=.2, size=4, fontface =2),color=colorDic[2]) +
+  geom_text(aes(y=lab_ypos, label=paste(round(perc, 1), '%', sep='')), fontface =2, 
+            stat="identity",
+            position = position_stack(vjust = 1)) +
+  theme(plot.margin = unit(c(25, 5.5, 5.5, 5.5), "points"),
+        axis.text.x = element_text(margin=margin(-5, 0, 0, 0))) -> p
+
+p
+
+ggsave(plot=p, width = 3.5, height = 5, device='jpeg',
+       filename="../Plots/CLP_Pilot2_Analysis_Plot_Beh.jpeg")
+ggsave(plot=p, width = 3.5, height = 5, device='pdf',
+       filename="../Plots/CLP_Pilot2_Analysis_Plot_Beh.pdf")
+```
+
+

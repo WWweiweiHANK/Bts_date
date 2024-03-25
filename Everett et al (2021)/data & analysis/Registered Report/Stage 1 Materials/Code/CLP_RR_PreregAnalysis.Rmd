@@ -1,0 +1,551 @@
+---
+title: "COVID-19 Leader Perceptions Registered Report (Preregistered Analyses)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: FALSE
+---
+
+<script>
+$(document).ready(function() {
+  $items = $('div#TOC li');
+  $items.each(function(idx) {
+    num_ul = $(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(tidy = FALSE, fig.align='left')
+options(knitr.kable.NA = '')
+```
+
+
+***
+
+# Setup
+
+***
+
+## Package Loading
+
+```{r, results='hide', message=FALSE, warning=FALSE}
+
+library(tidyr)
+library(dplyr)
+library(Hmisc)
+library(stringr)
+library(lme4)
+library(lmerTest)
+library(stats)
+library(emmeans)
+library(kableExtra)
+```
+
+
+## Dummy Data Loading
+
+```{r}
+# Load in data
+df <- read.csv("../Data/CLP_RR_PreregAnalysis_DummyData.csv", header=TRUE,
+               stringsAsFactors=FALSE)
+```
+
+## Set Factor Levels
+
+```{r}
+# Get rid of vars we won't use
+df <- select(df, subId, country, 
+              # Demographics
+              gender_recode, age, education, subj_SES, pol_ideology, religiosity,
+              # Other vars
+              support, check_selfrep, check_voting, taskOrder,
+              # Conditions
+              argument, dimension, dilemma,
+              # DVs
+              avg_trust, behav)
+
+# Recode the non-numeric variables
+df$gender_recode <- factor(df$gender_recode, levels=c("Female", "Male", "Other"))
+
+# Format the numeric variables
+df <- df %>% mutate_at(c('age', 'education', 'subj_SES', 'religiosity', 'pol_ideology', 
+                 'support', 'avg_trust'), as.numeric)
+
+# Set factor levels
+df <- df %>%
+  mutate(dilemma = ifelse(dilemma == "ppe", "PPE", capitalize(dilemma)),
+         dilemma = factor(dilemma, levels = c("Lockdown", "Tracing", "Ventilator", 
+                                              "PPE", "Medicine")))
+
+df <- df %>%
+  mutate(dimension = recode(dimension, "IH" = "Instrumental Harm", 
+                            "IB" = "Impartial Beneficence") ,
+         dimension = factor(dimension, levels = c("Instrumental Harm", "Impartial Beneficence")))
+
+df <- df %>%
+  mutate(argument = factor(argument, levels = c("Utilitarian", "Non-Utilitarian")))
+```
+
+### Check Factor Levels
+```{r}
+# Dimension
+print(unique(df$dimension))
+# Argument
+print(unique(df$argument))
+# Dilemma
+print(unique(df$dilemma))
+```
+
+## Effect coding
+
+```{r}
+df <- mutate(df,
+  argument_recode = recode(argument, "Non-Utilitarian" = -0.5, 
+                            "Utilitarian" = 0.5),
+  dimension_recode = recode(dimension, "Instrumental Harm" = -0.5,
+                            "Impartial Beneficence" = 0.5))
+
+# Check
+df %>%
+  dplyr::select(argument, argument_recode, dimension, dimension_recode) %>%
+  unique() %>%
+  kable(format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") 
+```
+
+Now the "non-utilitarian" condition is coded as -0.5, and the "utilitarian" condition as 0.5.
+Now Instrumental Harm is coded as -0.5, and Impartial Beneficence as 0.5.
+
+## Prepare dvs & scale covariates
+
+### Trust task
+
+```{r}
+df_self <- df %>% 
+  # Exclusion criteria 4: missing vars
+  filter(!is.na(avg_trust)) %>% 
+  ungroup() %>%
+  select(-behav) %>%
+  na.omit() %>%
+  # Exclusion criteria 5: failed check
+  filter(check_selfrep == 1) %>% 
+  # Scale
+  mutate_at(.funs=list(~ scale(., center = TRUE, scale=FALSE) %>% as.vector), 
+            vars(age, education, subj_SES, religiosity, pol_ideology, support))
+```
+
+`r length(unique(df_self$subId))` subjects in the self-reported trust task
+
+### Behavioral Task
+
+```{r}
+df_beh <- df %>% 
+  # Exclusion criteria 4: missing vars
+  filter(!is.na(behav)) %>% 
+  ungroup() %>%
+  select(-avg_trust) %>%
+  na.omit() %>%
+  # Exclusion criteria 5: failed check
+  filter(check_voting == 1) %>% 
+  # Recode answer
+  mutate(answer_recode = recode(behav, "Utilitarian" = 1,
+                                "Non-Utilitarian" = 0)) %>%
+  # Scale
+  mutate_at(.funs=list(~scale(., center = TRUE, scale=FALSE) %>% as.vector), 
+            vars(age, education, subj_SES, religiosity, pol_ideology, support))
+```
+
+`r length(unique(df_beh$subId))` subjects in the voting task
+
+## Set Contrasts
+
+```{r}
+options(contrasts = c("contr.treatment", "contr.poly")) # Set contrasts
+options("contrasts") # Confirm contrasts
+```
+
+## Self-reported Trust
+
+Here we look at the effects of argument type (non-utilitarian vs utilitarian) and dimension type (instrumental harm vs impartial beneficence), and their interaction, including participant demographics and other covariates.
+
+We use modified contrasts and uses mean-centered covariates. The baseline for gender is "Female". For argument type, the non-utilitarian is coded as -0.5 and the utilitarian as 0.5. For dimension type, instrumental harm is coded as -0.5, and impartial beneficence as 0.5
+
+As noted in the registered report, in the event of convergence or singularity issues, we will supplement the theoretically appropriate models described below with simplified models by reducing complexity of the random effects structure
+
+
+### Model #1: country as random intercept
+
+```{r}
+
+trust_model1 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES 
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1|country/subId) + (1|dilemma), 
+            data = df_self,
+            REML = TRUE)
+
+model.output <- summary(trust_model1)
+model.output <- model.output$coefficients
+model.output <- model.output[-1,]
+rownames(model.output) <- rownames(model.output) %>%
+                                     capitalize() %>%
+                                     gsub("_recode", "", .) %>%
+                                     gsub("Pol_ideology", "Political Ideology", .) %>%
+                                     gsub("Support", "Policy Support", .) %>%
+                                     gsub("Subj_SES", "Subjective SES", .) %>%
+                                     gsub('^(Gender)(.*)$', '\\1 [\\2]', .) %>%
+                                     gsub("Argument:dimension", "Argument x Dimension", .)
+colnames(model.output) <- colnames(model.output) %>%
+                                     gsub("Estimate", "B", .) %>%
+                                     gsub("Std. Error", "SE", .) %>%
+                                     gsub("t value", "t", .) %>%
+                                     gsub("Pr.*", "p", .)
+
+model.output[, c(1,2,4)] <- round(model.output[, c(1,2,4)], digits = 2)
+model.output[, 3] <- round(model.output[, 3], digits = 0)
+model.output[, 5] <- format.pval(model.output[, 5], eps = .001, digits = 3)
+
+kable(model.output, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") %>%
+      pack_rows("Covariates", 1, 8) %>%
+      pack_rows("Main Effects", 9, 10) %>%
+      pack_rows("Interaction", 11, 11)
+```
+
+### Model #2: country as random slope
+
+```{r}
+
+trust_model2 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES 
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1 + argument_recode|country) + (1 + dimension_recode|country) 
+            + (1 + argument_recode*dimension_recode|country)
+            + (1|country/subId) + (1|dilemma), 
+            data = df_self,
+            REML = TRUE)
+
+model.output <- summary(trust_model2)
+model.output <- model.output$coefficients
+model.output <- model.output[-1,]
+rownames(model.output) <- rownames(model.output) %>%
+                                     capitalize() %>%
+                                     gsub("_recode", "", .) %>%
+                                     gsub("Pol_ideology", "Political Ideology", .) %>%
+                                     gsub("Support", "Policy Support", .) %>%
+                                     gsub("Subj_SES", "Subjective SES", .) %>%
+                                     gsub('^(Gender)(.*)$', '\\1 [\\2]', .) %>%
+                                     gsub("Argument:dimension", "Argument x Dimension", .)
+colnames(model.output) <- colnames(model.output) %>%
+                                     gsub("Estimate", "B", .) %>%
+                                     gsub("Std. Error", "SE", .) %>%
+                                     gsub("t value", "t", .) %>%
+                                     gsub("Pr.*", "p", .)
+
+model.output[, c(1,2,4)] <- round(model.output[, c(1,2,4)], digits = 2)
+model.output[, 3] <- round(model.output[, 3], digits = 0)
+model.output[, 5] <- format.pval(model.output[, 5], eps = .001, digits = 3)
+
+kable(model.output, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") %>%
+      pack_rows("Covariates", 1, 8) %>%
+      pack_rows("Main Effects", 9, 10) %>%
+      pack_rows("Interaction", 11, 11)
+```
+
+### Compare model #1 (random intercepts) and model #2 (random slopes)
+
+If convergence is achieved and results differ from model 1:
+```{r}
+anova(trust_model1, trust_model2)
+```
+
+Get the best fitting model
+```{r}
+trust_model <- trust_model1 # or trust_model2
+```
+
+```{r}
+conf <- confint(trust_model, c("argument_recode", "dimension_recode", 
+  "argument_recode:dimension_recode"))
+kable(conf, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") 
+```
+
+```{r}
+em <- emmeans(trust_model,  specs=c("argument_recode", "dimension_recode"), adjust="bonferroni")
+kable(em, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+```{r}
+pairs = pairs(em, adjust="bonferroni", by="dimension_recode", reverse=TRUE)
+kable(pairs, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+```{r}
+kable(confint(pairs), format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+***
+## Voting Task
+
+Here we look at the effects of dimension type (instrumental harm vs impartial beneficence) on argument choice (non-utilitarian vs utilitarian), including participant demographics and other covariates.
+
+We use modified contrasts and uses mean-centered covariates. The baseline for gender is "Female". For argument type, the non-utilitarian is coded as -0.5 and the utilitarian as 0.5. For dimension type, instrumental harm is coded as -0.5, and impartial beneficence as 0.5
+
+As noted in the registered report, in the event of convergence or singularity issues, we will supplement the theoretically appropriate models described below with simplified models by reducing complexity of the random effects structure
+
+
+### Model #1: country as random intercept
+```{r}
+beh_model1 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode 
+               + (1|country/subId) + (1|dilemma),
+               data=df_beh, 
+               family=binomial(link = "logit"))
+
+model.output <- summary(beh_model1)
+model.output <- model.output$coefficients
+model.output <- model.output[-1,]
+rownames(model.output) <- rownames(model.output) %>%
+                                     capitalize() %>%
+                                     gsub("_recode", "", .) %>%
+                                     gsub("Pol_ideology", "Political Ideology", .) %>%
+                                     gsub("Support", "Policy Support", .) %>%
+                                     gsub("Subj_SES", "Subjective SES", .) %>%
+                                     gsub('^(Gender)(.*)$', '\\1 [\\2]', .)
+colnames(model.output) <- colnames(model.output) %>%
+                                     gsub("Estimate", "B", .) %>%
+                                     gsub("Std. Error", "SE", .) %>%
+                                     gsub("z value", "z", .) %>%
+                                     gsub("Pr.*", "p", .)
+
+model.output[, 1:3] <- round(model.output[, 1:3], digits = 2)
+model.output[, 4] <- format.pval(model.output[, 4], eps = .001, digits = 3)
+
+kable(model.output, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") %>%
+pack_rows("Covariates", 1, 8) %>%
+pack_rows("Main Effect", 9, 9)
+```
+
+### Model #2: country as random slope
+
+```{r}
+beh_model2 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode 
+               + (1 + dimension_recode|country) 
+               + (1|country/subId) + (1|dilemma),
+               data=df_beh, 
+               family=binomial(link = "logit"))
+
+model.output <- summary(beh_model2)
+model.output <- model.output$coefficients
+model.output <- model.output[-1,]
+rownames(model.output) <- rownames(model.output) %>%
+                                     capitalize() %>%
+                                     gsub("_recode", "", .) %>%
+                                     gsub("Pol_ideology", "Political Ideology", .) %>%
+                                     gsub("Support", "Policy Support", .) %>%
+                                     gsub("Subj_SES", "Subjective SES", .) %>%
+                                     gsub('^(Gender)(.*)$', '\\1 [\\2]', .)
+colnames(model.output) <- colnames(model.output) %>%
+                                     gsub("Estimate", "B", .) %>%
+                                     gsub("Std. Error", "SE", .) %>%
+                                     gsub("z value", "z", .) %>%
+                                     gsub("Pr.*", "p", .)
+
+model.output[, 1:3] <- round(model.output[, 1:3], digits = 2)
+model.output[, 4] <- format.pval(model.output[, 4], eps = .001, digits = 3)
+
+kable(model.output, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") %>%
+pack_rows("Covariates", 1, 8) %>%
+pack_rows("Main Effect", 9, 9)
+```
+
+### Compare model #1 (random intercepts) and model #2 (random slopes)
+
+If convergence is achieved and results differ from model 1:
+```{r}
+anova(beh_model1, beh_model2)
+```
+
+Get the best fitting model
+```{r}
+beh_model <- beh_model1 # or beh_model2
+```
+
+### Model #3: linear (instead of logit link)
+
+```{r}
+beh_model3 <- lmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode
+               ### ADD random effects from winning model
+               + (1|dilemma),
+               data=df_beh, 
+               REML = TRUE)
+
+model.output <- summary(beh_model3)
+model.output <- model.output$coefficients
+model.output <- model.output[-1,]
+rownames(model.output) <- rownames(model.output) %>%
+                                     capitalize() %>%
+                                     gsub("_recode", "", .) %>%
+                                     gsub("Pol_ideology", "Political Ideology", .) %>%
+                                     gsub("Support", "Policy Support", .) %>%
+                                     gsub("Subj_SES", "Subjective SES", .) %>%
+                                     gsub('^(Gender)(.*)$', '\\1 [\\2]', .)
+colnames(model.output) <- colnames(model.output) %>%
+                                     gsub("Estimate", "B", .) %>%
+                                     gsub("Std. Error", "SE", .) %>%
+                                     gsub("t value", "t", .) %>%
+                                     gsub("Pr.*", "p", .)
+
+model.output[, c(1,2,4)] <- round(model.output[, c(1,2,4)], digits = 2)
+model.output[, 3] <- round(model.output[, 3], digits = 0)
+model.output[, 5] <- format.pval(model.output[, 5], eps = .001, digits = 3)
+
+kable(model.output, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") %>%
+      pack_rows("Covariates", 1, 8) %>%
+      pack_rows("Main Effects", 9, 9)
+```
+
+
+
+### Compare model #1 or 2 (logistic) and model #3 (linear)
+
+If convergence is achieved and results differ from model 1:
+```{r}
+anova(beh_model1, beh_model3)
+```
+
+
+### Follow up Tests:
+
+If logit:
+
+Compute confidence intervals using Profile (standard) method:
+
+```{r, error=TRUE}
+conf <- NULL
+conf <- confint(beh_model, "dimension_recode")
+kable(conf, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+
+```
+
+Try the Wald method if Profile method fails:
+
+```{r}
+conf <- confint(beh_model, "dimension_recode", method="Wald")
+kable(conf, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+
+```
+
+Odds ratio: `r round(exp(as.numeric(model.output['Dimension', 'B'])), 2)`
+
+```{r}
+em <- emmeans(beh_model,  specs=c("dimension_recode"), 
+              adjust="bonferroni", type = "response")
+kable(em, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+
+If linear:
+
+```{r}
+conf <- confint(beh_model3, c("dimension_recode"))
+kable(conf, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left") 
+```
+
+```{r}
+em <- emmeans(beh_model3,  specs=c("dimension_recode"), adjust="bonferroni")
+kable(em, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+```
+
+
+## Robusteness checks
+
+We will re run the winning models a couple different ways:
+
+Filtering out the Lockdown dilemma
+```{r}
+# df <- df %>%
+  # filter(dilemma != "Lockdown")
+```
+
+Only in countries where contact tracing has already been implemented:
+With the Tracing dilemma:
+```{r}
+# df <- df %>%
+  # filter(country %in% c("China", "India", "Israel", "Singapore", "South Korea"))
+```
+
+Without the Tracing dilemma:
+```{r}
+# df <- df %>%
+  # filter(dilemma != "Tracing") %>%
+  # filter(country %in% c("China", "India", "Israel", "Singapore", "South Korea"))
+```
+
+And accounting for order, we will simply 
+1. Figure out if current score is from a task that follows a tracing dilemma
+2. Add the variable (i.e. afterTrac) as fixed effect in the winning models
+
+```{r}
+df <- df %>%
+  mutate(TinSelfRep = ifelse(dilemma=="Tracing" & !is.na(avg_trust), 1, 0),
+         TinBeh = ifelse(dilemma=="Tracing" & !is.na(behav), 1, 0)) %>%
+  group_by(subId) %>%
+  mutate(TinSelfRep = max(TinSelfRep),
+         TinBeh = max(TinBeh)) %>%
+  ungroup() %>%
+  mutate(afterTrac = ifelse(TinBeh == 1 & taskOrder == "behav" & !is.na(avg_trust), 1, 
+                            ifelse(TinSelfRep == 1 & taskOrder == "self-rep" & !is.na(behav), 1, 0)))
+
+# trust_model1 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES
+#             + pol_ideology + religiosity + support
+#             + afterTrac
+#             + argument_recode + dimension_recode + argument_recode:dimension_recode
+#             + (1|country/subId) + (1|dilemma),
+#             data = df_self,
+#             REML = TRUE)
+```
+
+

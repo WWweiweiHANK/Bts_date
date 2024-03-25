@@ -1,0 +1,1276 @@
+---
+title: "COVID-19 Leader Perceptions Registered Report (Main Analyses)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: FALSE
+---
+
+<script>
+$(document).ready(function() {
+  $items = $('div#TOC li');
+  $items.each(function(idx) {
+    num_ul = $(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(tidy = FALSE, fig.align='left')
+kable <- function(data) {
+  knitr::kable(data, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+}
+```
+
+```{r}
+rand_seed = 828
+set.seed(rand_seed)
+```
+
+# Setup
+
+## Package Loading
+
+```{r, message=F}
+library(tidyr)
+library(dplyr)
+library(Hmisc)
+library(stringr)
+library(lme4)
+library(lmerTest)
+library(stats)
+library(emmeans)
+library(kableExtra)
+library(estimatr)
+library(ggeffects)
+library(arm)
+library(randomizr)
+library(ri2)
+library(glmnet)
+library(caret)
+select <- dplyr::select
+```
+
+## Data Loading
+
+```{r}
+df <- read.csv("data.csv", header=TRUE, stringsAsFactors=FALSE)
+```
+
+## Set Factor Levels
+
+```{r}
+# Get rid of vars we won't use
+df <- select(df, subId, country, 
+              # Demographics
+              gender_recode, age, education, subj_SES, pol_ideology, religiosity,
+              # Other vars
+              support, check_selfrep, check_voting, taskOrder,
+              # Conditions
+              argument, dimension, dilemma,
+              # DVs
+              avg_trust, behav)
+
+# Recode the non-numeric variables
+df$gender_recode <- factor(df$gender_recode, levels=c("Female", "Male", "Other"))
+df$subId <- factor(df$subId)
+df$country <- factor(df$country)
+
+# Format the numeric variables
+df <- df %>% mutate_at(c('age', 'education', 'subj_SES', 'religiosity', 'pol_ideology', 
+                 'support', 'avg_trust'), as.numeric)
+
+# Set factor levels
+df <- df %>%
+  mutate(dilemma = ifelse(dilemma == "ppe", "PPE", capitalize(dilemma)),
+         dilemma = factor(dilemma, levels = c("Lockdown", "Tracing", "Ventilator", 
+                                              "PPE", "Medicine")))
+
+df <- df %>%
+  mutate(dimension = recode(dimension, "IH" = "Instrumental Harm", 
+                            "IB" = "Impartial Beneficence") ,
+         dimension = factor(dimension, levels = c("Instrumental Harm", "Impartial Beneficence")))
+
+df <- df %>%
+  mutate(argument = factor(argument, levels = c("Utilitarian", "Non-Utilitarian")))
+```
+
+Dimensions: `r unique(df$dimension)`
+
+Arguments: `r unique(df$argument)`
+
+Dilemmas: `r unique(df$dilemma)`
+
+## Effect coding
+
+```{r}
+df <- mutate(df,
+  argument_recode = recode(argument, "Non-Utilitarian" = -0.5, 
+                            "Utilitarian" = 0.5),
+  dimension_recode = recode(dimension, "Instrumental Harm" = -0.5,
+                            "Impartial Beneficence" = 0.5))
+
+# Check
+df %>%
+  dplyr::select(argument, argument_recode, dimension, dimension_recode) %>%
+  unique() %>%
+  kable()
+```
+
+## Prepare dvs & scale covariates
+
+### Trust Task
+
+```{r}
+df_self <- df %>% 
+  # Exclusion criteria 4: missing vars
+  filter(!is.na(avg_trust)) %>% 
+  ungroup() %>%
+  select(-behav) %>%
+  na.omit() %>%
+  # Exclusion criteria 5: failed check
+  filter(check_selfrep == 1) %>% 
+  # Scale
+  mutate_at(.funs=list(~ scale(., center = TRUE, scale=FALSE) %>% as.vector), 
+            vars(age, education, subj_SES, religiosity, pol_ideology, support))
+```
+
+`r length(unique(df_self$subId))` subjects in the self reported trust task
+
+### Voting
+
+```{r}
+df_beh <- df %>% 
+  # Exclusion criteria 4: missing vars
+  filter(!is.na(behav)) %>% 
+  ungroup() %>%
+  select(-avg_trust) %>%
+  na.omit() %>%
+  # Exclusion criteria 5: failed check
+  filter(check_voting == 1) %>% 
+  # Recode answer
+  mutate(answer_recode = recode(behav, "Utilitarian" = 1,
+                                "Non-Utilitarian" = 0)) %>%
+  # Scale
+  mutate_at(.funs=list(~scale(., center = TRUE, scale=FALSE) %>% as.vector), 
+            vars(age, education, subj_SES, religiosity, pol_ideology, support))
+```
+
+`r length(unique(df_beh$subId))` subjects in the voting task
+
+## Set Contrasts
+
+```{r}
+options(contrasts = c("contr.treatment", "contr.poly")) # Set contrasts
+```
+  
+Contrasts: `r options("contrasts")$contrasts`
+
+## Formatting Functions
+
+```{r}
+format_output <- function(thisModel){
+  model.output <- summary(thisModel)
+  model.output <- as.data.frame(model.output$coefficients)
+  model.output <- model.output[-1,]
+  rownames(model.output) <- rownames(model.output) %>%
+                                       capitalize() %>%
+                                       gsub("_recode", "", .) %>%
+                                       gsub("Pol_ideology", "Political Ideology", .) %>%
+                                       gsub("Support", "Policy Support", .) %>%
+                                       gsub("Subj_SES", "Subjective SES", .) %>%
+                                       gsub('^(Gender)(.*)$', '\\1 [\\2]', .) %>%
+                                       gsub("Argument:dimension", "Argument x Dimension", .)
+  colnames(model.output) <- colnames(model.output) %>%
+                                       gsub("Estimate", "B", .) %>%
+                                       gsub("Std. Error", "SE", .) %>%
+                                       gsub("t value", "t", .) %>%
+                                       gsub("z value", "z", .) %>%
+                                       gsub("Pr.*", "p", .)
+  
+  for (var in colnames(model.output)) {
+    if (var %in% c('B', 'SE', 't', 'z')) {
+      model.output[[var]] <- round(model.output[[var]], digits = 2)
+    } else if (var == 'p') {
+      model.output[[var]] <- format.pval(model.output[[var]], eps = .001, digits = 3)
+    } else if (var == 'df') {
+      model.output[[var]] <- round(model.output[[var]], digits = 0)
+    }
+  } 
+  
+  return(model.output)
+}
+```
+
+```{r}
+print_output <- function(thisModel, thisIv, thisConf){
+  
+  summ <- summary(thisModel)$coefficients
+  
+  formatted = (paste("B = ", round(summ[thisIv, 'Estimate'], 2),
+  ", SE = ", round(summ[thisIv, 'Std. Error'], 2), sep=''))
+  if (class(thisModel)[1] %in% c('glmerMod', 'glm')) {
+    formatted = (paste(formatted, ", z = ", round(summ[thisIv, 'z value'], 2), 
+                     ", p = ", round(summ[thisIv, 'Pr(>|z|)'], 3), sep=''))
+  } else if (class(thisModel)[1] == 'lm') {
+  formatted = (paste(formatted, ", t = ", round(summ[thisIv, 't value'], 2), 
+                     ", p = ", round(summ[thisIv, 'Pr(>|t|)'], 3), sep=''))
+  } else if (class(thisModel)[1] == 'lm_robust') {
+  formatted = (paste(formatted, ", t(", round(summ[thisIv, 'DF'], 0), ") ",
+                     "= ", round(summ[thisIv, 't value'], 2), 
+                     ", p = ", round(summ[thisIv, 'Pr(>|t|)'], 3), sep=''))
+  } else {
+  formatted = (paste(formatted, ", t(", round(summ[thisIv, 'df'], 0), ") ",
+                     "= ", round(summ[thisIv, 't value'], 2), 
+                     ", p = ", round(summ[thisIv, 'Pr(>|t|)'], 3), sep=''))
+  }
+  if (is.null(rownames(thisConf))) {
+  formatted = (paste(formatted, ", CI = [", round(thisConf[1], 2),
+                     ", ", round(thisConf[2], 2), "]", sep=''))
+    
+  } else {
+  formatted = (paste(formatted, ", CI = [", round(thisConf[thisIv, 1], 2),
+                     ", ", round(thisConf[thisIv, 2], 2), "]", sep=''))
+  }
+  if (class(thisModel)[1] %in% c('glmerMod', 'glm')) {
+    formatted = (paste(formatted, ", OR = ", round(exp(summ[thisIv, 'Estimate']), 2), sep=''))
+  } 
+  return(formatted)
+}
+```
+
+```{r}
+print_output_posthoc <- function(thisEm, thisIv, thisPairs, thisConfPairs){
+  
+  formatted = (paste("B = ", round(filter(as.data.frame(thisPairs), dimension_recode == thisIv)['estimate'], 2),
+  ", SE = ", round(filter(as.data.frame(thisPairs), dimension_recode == thisIv)['SE'], 2),
+  ", t(", round(filter(as.data.frame(thisPairs), dimension_recode == thisIv)['df'], 0), ") ",
+  "= ", round(filter(as.data.frame(thisPairs), dimension_recode == thisIv)['t.ratio'], 2),
+  ", p = ", round(filter(as.data.frame(thisPairs), dimension_recode == thisIv)['p.value'], 3),
+  ", CI = [", round(filter(thisConfPairs, dimension_recode == thisIv)['lower.CL'], 2),
+  ", ", round(filter(thisConfPairs, dimension_recode == thisIv)['upper.CL'], 2), "]", sep=''))
+
+  return(formatted)
+}
+```
+
+```{r}
+print_output_means <- function(thisMeans, thisIv){
+  
+  if ('emmean' %in% colnames(thisMeans)) {
+    formatted = (paste(round(filter(thisMeans, dimension_recode == thisIv)['emmean'], 2),
+    ", SE = ", round(filter(thisMeans, dimension_recode == thisIv)['SE'], 2),
+    ", CI = [", round(filter(thisMeans, dimension_recode == thisIv)['lower.CL'], 2),
+    ", ", round(filter(thisMeans, dimension_recode == thisIv)['upper.CL'], 2), "]", sep=''))
+  } else {
+    formatted = (paste(round(filter(thisMeans, dimension_recode == thisIv)['prob'], 2),
+    ", SE = ", round(filter(thisMeans, dimension_recode == thisIv)['SE'], 2),
+    ", CI = [", round(filter(thisMeans, dimension_recode == thisIv)['asymp.LCL'], 2),
+    ", ", round(filter(thisMeans, dimension_recode == thisIv)['asymp.UCL'], 2), "]", sep=''))
+  }
+
+  return(formatted)
+}
+```
+
+# Hypothesis 1: Self report
+
+### 1. Country random intercept
+
+```{r}
+trust_model1 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1|country/subId) + (1|dilemma),
+            data = df_self,
+            REML = TRUE)
+```
+
+
+```{r}
+kable(format_output(trust_model1)) 
+```
+
+### 2. Country random slope
+
+```{r}
+trust_model2 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1 + argument_recode|country) + (1 + dimension_recode|country)
+            + (1 + argument_recode:dimension_recode|country)
+            + (1|country/subId) + (1|dilemma),
+            data = df_self,
+            REML = TRUE)
+```
+
+```{r}
+kable(format_output(trust_model2)) 
+```
+
+Due to convergence issues, we'll report the first model.
+
+```{r}
+conf <- confint(trust_model1, c("argument_recode", "dimension_recode",
+  "argument_recode:dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+```{r}
+em <- emmeans(trust_model1,  specs=c("argument_recode", "dimension_recode"),
+              adjust="bonferroni",
+              lmer.df = "satterthwaite", lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+```{r}
+pairs = pairs(em, adjust="bonferroni", by="dimension_recode", reverse=TRUE)
+kable(pairs)
+```
+
+```{r}
+confpairs = confint(pairs, level = 0.975)
+kable(confpairs)
+```
+
+Argument: `r print_output(trust_model1, 'argument_recode', conf)`
+
+Dimension: `r print_output(trust_model1, 'dimension_recode', conf)`
+
+Interaction: `r print_output(trust_model1, 'argument_recode:dimension_recode', conf)`
+
+
+Instrumental Harm dilemmas:
+
+utilitarian leaders = `r print_output_means(filter(confem, argument_recode==0.5), -0.5)`
+
+non-utilitarian leaders = `r print_output_means(filter(confem, argument_recode==-0.5), -0.5)`
+
+`r print_output_posthoc(em, -0.5, pairs, confpairs)`
+
+
+Impartial Beneficence dilemmas:
+
+utilitarian leaders = `r print_output_means(filter(confem, argument_recode==0.5), 0.5)`
+
+non-utilitarian leaders = `r print_output_means(filter(confem, argument_recode==-0.5), 0.5)`
+
+`r print_output_posthoc(em, 0.5, pairs, confpairs)`
+
+
+# Hypothesis 2: Voting
+
+### 1. Logit, country random intercept
+
+```{r}
+beh_model1 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode
+               + (1|country/subId) + (1|dilemma),
+               data=df_beh,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model1))
+```
+
+Singular fit, simplify:
+
+```{r}
+beh_model1 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode
+               + (1|country)
+               + (1|dilemma),
+               data=df_beh,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model1))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model1, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Marginal Means:
+
+```{r}
+em <- emmeans(beh_model1,  specs=c("dimension_recode"),
+              adjust="bonferroni", type = "response",
+              lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model1, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+write.csv(confem, 'ModelEstimates_Voting.csv', row.names = F)
+```
+
+```{r}
+prediction <- ggpredict(beh_model1, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+### 2. Logit, country random slope
+
+```{r}
+beh_model2 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode
+               + (1 + dimension_recode|country)
+               + (1|country/subId) + (1|dilemma),
+               data=df_beh,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model2))
+```
+
+Singular fit, simplify:
+
+```{r}
+beh_model2 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode
+               + (1 + dimension_recode|country)
+               + (1|country) + (1|dilemma),
+               data=df_beh,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model2))
+```
+
+### 3. Linear, country random intercept
+
+```{r}
+beh_model3 <- lmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode
+               + (1|country)
+               + (1|dilemma),
+               data=df_beh,
+               REML = TRUE)
+```
+
+```{r}
+kable(format_output(beh_model3))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model3, c("dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+```{r}
+em <- emmeans(beh_model3,  specs=c("dimension_recode"), adjust="bonferroni", 
+              lmer.df = "satterthwaite", lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model3, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+prediction <- ggpredict(beh_model3, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+### TOST
+
+```{r}
+df_beh %>%
+  group_by(answer_recode, dimension_recode) %>%
+  summarise(counts=n(), .groups = "drop") %>%
+  group_by(dimension_recode) %>%
+  mutate(total=sum(counts)) %>%
+  ungroup() %>%
+  mutate(prop=counts/total) %>%
+  filter(answer_recode==1) -> props
+
+# ΔL = -0.15 and ΔU = 0.15
+TOSTER::TOSTtwo.prop(prop1=props$prop[props$dimension_recode==0.5], 
+                     prop2=props$prop[props$dimension_recode==-0.5], 
+                     n1=props$total[props$dimension_recode==0.5], 
+                     n2=props$total[props$dimension_recode==-0.5], 
+                     low_eqbound = -0.15, 
+                     high_eqbound = 0.15, 
+                     alpha = .05, plot = TRUE, verbose = TRUE)
+```
+
+### 4. Logit, no random effects
+
+```{r}
+beh_model4 <- glm(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode,
+               data=df_beh,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model4))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model4, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Marginal Means:
+
+```{r}
+em <- emmeans(beh_model4,  specs=c("dimension_recode"),
+              adjust="bonferroni", type = "response",
+              lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model4, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+prediction <- ggpredict(beh_model4, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+### 5. Linear, no random effects
+
+```{r}
+beh_model5 <- lm(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode,
+               data=df_beh)
+```
+
+```{r}
+kable(format_output(beh_model5))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model5, c("dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+```{r}
+em <- emmeans(beh_model5,  specs=c("dimension_recode"), adjust="bonferroni",
+              lmer.df = "satterthwaite", lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model5, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+prediction <- ggpredict(beh_model5, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+### 6. Logit, no covariates
+
+```{r}
+beh_model6 <- glm(answer_recode ~ dimension_recode,
+               data=df_beh,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model6))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model6, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Marginal Means:
+
+```{r}
+em <- emmeans(beh_model6,  specs=c("dimension_recode"),
+              adjust="bonferroni", type = "response",
+              lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model6, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+prediction <- ggpredict(beh_model6, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+### 7. Linear, no covariates
+
+```{r}
+beh_model7 <- lm(answer_recode ~ dimension_recode,
+               data=df_beh)
+```
+
+```{r}
+kable(format_output(beh_model7))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model7, c("dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+```{r}
+em <- emmeans(beh_model7,  specs=c("dimension_recode"), adjust="bonferroni",
+              lmer.df = "satterthwaite", lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model7, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+prediction <- ggpredict(beh_model7, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+### 8. Logit, country fixed
+
+```{r}
+beh_model8 <- glm(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support + country
+               + dimension_recode,
+               data=df_beh,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model8))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model8, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Marginal Means:
+
+```{r}
+em <- emmeans(beh_model8,  specs=c("dimension_recode"),
+              adjust="bonferroni", type = "response",
+              lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model8, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+prediction <- ggpredict(beh_model8, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+### 9. Linear, country fixed
+
+```{r}
+beh_model9 <- lm(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support + country
+               + dimension_recode,
+               data=df_beh)
+```
+
+```{r}
+kable(format_output(beh_model9))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model9, c("dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+```{r}
+em <- emmeans(beh_model9,  specs=c("dimension_recode"), adjust="bonferroni",
+              lmer.df = "satterthwaite", lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model9, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+prediction <- ggpredict(beh_model9, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+### 10. Linear, robust SEs
+
+```{r}
+beh_model10 <- lm_robust(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support 
+               + dimension_recode,
+               clusters = country,
+               data=df_beh)
+```
+
+```{r}
+kable(format_output(beh_model10))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model10, c("dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+```{r}
+em <- emmeans(beh_model10,  specs=c("dimension_recode"), adjust="bonferroni",
+              lmer.df = "satterthwaite", lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model10, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+```{r}
+prediction <- ggpredict(beh_model10, "dimension_recode")
+```
+
+Prediction: `r round(prediction$predicted[2]-prediction$predicted[1], 2)`
+
+# Country coefficients
+
+### Self Report
+
+```{r}
+srep_model <- lmer(avg_trust ~ gender_recode + age + education + subj_SES
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1 + argument_recode*dimension_recode|country),
+            data = df_self,
+            REML = TRUE)
+```
+
+```{r}
+coefficients_srep <- coef(srep_model)$country
+coefficients_srep <- rbind(coefficients_srep, Overall=fixef(srep_model))
+coefficients_srep$country <- rownames(coefficients_srep)
+
+errors <- se.coef(srep_model)$country
+errors <- rbind(errors, overall=se.fixef(srep_model)[c(1, 12)])
+colnames(errors) <- paste(colnames(errors), '_error', sep = '')
+write.csv(cbind(coefficients_srep, errors), 'CountryCoeffs_SelfRep.csv', row.names = F)
+```
+
+```{r}
+kable(format_output(srep_model))
+```
+
+```{r}
+conf <- confint(srep_model, c("argument_recode:dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+Interaction: `r print_output(srep_model, 'argument_recode:dimension_recode', conf)`
+
+### Voting
+
+```{r}
+vot_model <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode 
+               + (1 + dimension_recode|country),
+               data=df_beh,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+coefficients_vot <- coef(vot_model)$country
+coefficients_vot <- rbind(coefficients_vot, Overall=fixef(vot_model))
+coefficients_vot$country <- rownames(coefficients_vot)
+
+errors <- se.coef(vot_model)$country
+errors <- rbind(errors, overall=se.fixef(vot_model)[c(1, 10)])
+colnames(errors) <- paste(colnames(errors), '_error', sep = '')
+write.csv(cbind(coefficients_vot, errors), 'CountryCoeffs_Voting.csv', row.names = F)
+```
+
+```{r}
+kable(format_output(vot_model))
+```
+
+```{r}
+conf <- confint(vot_model, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Dimension: `r print_output(vot_model, 'dimension_recode', conf)`
+
+```{r}
+corr <- cor.test(coefficients_srep$`argument_recode:dimension_recode`, 
+         coefficients_vot$dimension_recode)
+```
+
+Correlation between self report task and voting task across countries: 
+r=`r round(corr$estimate, 2)`, p=`r round(corr$p.value, 3)`
+
+# Robustness checks
+
+We will re run the winning models a couple different ways:
+
+## Exclude Lockdown dilemma
+
+### Self Report
+
+```{r}
+trust_model1 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES 
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1|country/subId) + (1|dilemma), 
+            data = filter(df_self, dilemma != "Lockdown"),
+            REML = TRUE)
+```
+
+```{r}
+kable(format_output(trust_model1))
+```
+
+```{r}
+conf <- confint(trust_model1, c("argument_recode:dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+Interaction: `r print_output(trust_model1, 'argument_recode:dimension_recode', conf)`
+
+### Voting
+
+```{r}
+beh_model1 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode 
+               + (1|country)
+               + (1|dilemma),
+               data=filter(df_beh, dilemma != "Lockdown"),
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model1))
+```
+
+```{r}
+conf <- confint(beh_model1, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Dimension: `r print_output(beh_model1, 'dimension_recode', conf)`
+
+## In countries where contact tracing has already been implemented:
+
+### Self Report with Tracing
+
+```{r}
+trust_model1 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES 
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1|country/subId) + (1|dilemma), 
+            data = filter(df_self, country %in% c("China", "India", "Israel", "Singapore", "South Korea")),
+            REML = TRUE)
+```
+
+```{r}
+kable(format_output(trust_model1))
+```
+
+```{r}
+conf <- confint(trust_model1, c("argument_recode:dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+Interaction: `r print_output(trust_model1, 'argument_recode:dimension_recode', conf)`
+
+### Self Report without Tracing:
+
+```{r}
+trust_model1 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES 
+            + pol_ideology + religiosity + support
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1|country/subId) + (1|dilemma), 
+            data = filter(df_self, country %in% c("China", "India", "Israel", "Singapore", "South Korea"), dilemma!="Tracing"),
+            REML = TRUE)
+```
+
+```{r}
+kable(format_output(trust_model1))
+```
+
+```{r}
+conf <- confint(trust_model1, c("argument_recode:dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+Interaction: `r print_output(trust_model1, 'argument_recode:dimension_recode', conf)`
+
+### Voting with Tracing
+
+```{r}
+beh_model1 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode 
+               + (1|country)
+               + (1|dilemma),
+               data = filter(df_beh, country %in% c("China", "India", "Israel", "Singapore", "South Korea")),
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model1))
+```
+
+```{r}
+conf <- confint(beh_model1, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Dimension: `r print_output(beh_model1, 'dimension_recode', conf)`
+
+### Voting without Tracing
+
+```{r}
+beh_model1 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode 
+               + (1|country)
+               + (1|dilemma),
+               data = filter(df_beh, country %in% c("China", "India", "Israel", "Singapore", "South Korea"), dilemma!="Tracing"),
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model1))
+```
+
+```{r}
+conf <- confint(beh_model1, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Dimension: `r print_output(beh_model1, 'dimension_recode', conf)`
+
+## Accounting for order:
+
+1. Figure out if current score is from a task that follows a tracing dilemma
+2. Add the variable (i.e. afterTrac) as fixed effect in the winning models
+
+```{r}
+df_tmp <- df %>%
+  mutate(TinSelfRep = ifelse(dilemma=="Tracing" & !is.na(avg_trust), 1, 0),
+         TinBeh = ifelse(dilemma=="Tracing" & !is.na(behav), 1, 0)) %>%
+  group_by(subId) %>%
+  mutate(TinSelfRep = max(TinSelfRep),
+         TinBeh = max(TinBeh)) %>%
+  ungroup() %>%
+  mutate(SRepAfterTrac = ifelse(TinBeh == 1 & taskOrder == "Behav First" & !is.na(avg_trust), 1, 0),
+         VotAfterTrac = ifelse(TinSelfRep == 1 & taskOrder == "SRep First" & !is.na(behav), 1, 0))
+
+df_self <- df_tmp %>%
+  filter(!is.na(avg_trust)) %>%
+  select(subId, dilemma, SRepAfterTrac) %>%
+  merge(df_self, by=c("subId", "dilemma"))
+
+df_beh <- df_tmp %>%
+  filter(!is.na(behav)) %>%
+  select(subId, dilemma, VotAfterTrac) %>%
+  merge(df_beh, by=c("subId", "dilemma"))
+```
+
+### Self Report
+
+```{r}
+trust_model1 <- lmer(avg_trust ~ gender_recode + age + education + subj_SES 
+            + pol_ideology + religiosity + support
+            + SRepAfterTrac
+            + argument_recode + dimension_recode + argument_recode:dimension_recode
+            + (1|country/subId) + (1|dilemma), 
+            data = filter(df_self, country %in% c("China", "India", "Israel", "Singapore", "South Korea")),
+            REML = TRUE)
+```
+
+```{r}
+kable(format_output(trust_model1))
+```
+
+```{r}
+conf <- confint(trust_model1, c("argument_recode:dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+Interaction: `r print_output(trust_model1, 'argument_recode:dimension_recode', conf)`
+
+### Voting
+
+```{r}
+beh_model1 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + VotAfterTrac
+               + dimension_recode 
+               + (1|country)
+               + (1|dilemma),
+               data = filter(df_beh, country %in% c("China", "India", "Israel", "Singapore", "South Korea")),
+               family=binomial(link = "logit"))
+```
+
+```{r}
+kable(format_output(beh_model1))
+```
+
+```{r}
+conf <- confint(beh_model1, "dimension_recode", level = 0.975)
+kable(conf)
+```
+
+Dimension: `r print_output(beh_model1, 'dimension_recode', conf)`
+
+# Additional Analyses
+## Covariate Selection
+
+Lasso regression of all covariates on DV.
+
+```{r}
+x <- model.matrix(answer_recode~., dplyr::select(df_beh, gender_recode:support, 
+                                                 country, answer_recode))[,-1]
+y <- df_beh$answer_recode
+
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+lasso.model <- glmnet(x, y, alpha = 1, family = "binomial",
+                      lambda = cv.lasso$lambda.min)
+
+coef(lasso.model)
+```
+
+Lasso regression of all covariates on IV.
+
+```{r}
+x <- model.matrix(dimension_recode~., dplyr::select(df_beh, gender_recode:support,
+                                                    country, dimension_recode))[,-1]
+y <- df_beh$dimension_recode
+
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+lasso.model <- glmnet(x, y, alpha = 1, family = "binomial",
+                      lambda = cv.lasso$lambda.min)
+
+coef(lasso.model)
+```
+
+Linear regression of all identified important covariates (step 1+2) and focal IV on DV.
+
+```{r}
+beh_model11 <- lm(answer_recode ~ gender_recode + age + subj_SES
+               + pol_ideology + religiosity + support + country
+               + dimension_recode,
+               data=df_beh)
+```
+
+```{r}
+kable(format_output(beh_model11))
+```
+
+Follow up Tests:
+
+```{r}
+conf <- confint(beh_model11, c("dimension_recode"), level = 0.975)
+kable(conf)
+```
+
+```{r}
+em <- emmeans(beh_model11,  specs=c("dimension_recode"), adjust="bonferroni",
+              lmer.df = "satterthwaite", lmerTest.limit = 35179)
+confem <- confint(em, adjust = "bonferroni", level = 0.975)
+kable(confem)
+```
+
+Dimension: `r print_output(beh_model11, 'dimension_recode', conf)`
+
+Instrumental Harm dilemmas: `r print_output_means(confem, -0.5)`
+
+Impartial Beneficence dilemmas: `r print_output_means(confem, 0.5)`
+
+## Randomization Inference
+
+```{r}
+N <- length(unique(df_beh$subId))
+
+# calculate Ns per country/dimension
+block_m_each = matrix(nrow=22, ncol=2)
+i = 0
+for (c in sort(unique(df_beh$country))) {
+  i = i+1
+  block_m_each[i, 1] = length(unique(filter(df_beh, country==c, dimension_recode == 0.5)$subId))
+  block_m_each[i, 2] = length(unique(filter(df_beh, country==c, dimension_recode == -0.5)$subId))
+}
+
+# calculate the probabilities of assignment
+declaration <- declare_ra(N = N,
+                          blocks = df_beh$country,
+                          block_m_each = block_m_each)
+
+df_beh_ri <- df_beh
+df_beh_ri$dimension_recode <- df_beh_ri$dimension_recode + .5
+df_beh_ri$answer_recode <- df_beh_ri$answer_recode + .5
+
+ri_out <- conduct_ri(formula =  answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support 
+               + dimension_recode,
+                   declaration = declaration,
+                   assignment = "dimension_recode",
+                   outcome = "answer_recode",
+                   sharp_hypothesis = 0,
+                   data = df_beh_ri)
+```
+
+```{r}
+summary(ri_out)
+```
+
+```{r}
+plot(ri_out)
+```
+
+## Predictive Accuracy
+
+Split data
+
+```{r}
+trainingData <- createDataPartition(y = df_beh$answer_recode, 
+                               p = .50, list = FALSE)
+training <- df_beh[trainingData,]
+testing <- df_beh[-trainingData,]
+```
+
+Train logistic & linear models
+
+```{r}
+beh_model1 <- glmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode
+               + (1|country)
+               + (1|dilemma),
+               data=training,
+               family=binomial(link = "logit"))
+```
+
+```{r}
+format_output(beh_model1)
+```
+
+```{r}
+beh_model3 <- lmer(answer_recode ~ gender_recode + age + education + subj_SES
+               + pol_ideology + religiosity + support
+               + dimension_recode
+               + (1|country)
+               + (1|dilemma),
+               data=training,
+               REML = TRUE)
+```
+
+```{r}
+format_output(beh_model3)
+```
+
+Predictions
+
+```{r}
+testing$pred_glm <- predict(beh_model1, testing)
+testing$pred_glm <- exp(testing$pred_glm)
+testing$pred_glm <- testing$pred_glm/(1+testing$pred_glm)
+
+testing$pred_lm <- predict(beh_model3, testing)
+
+testing$predict_glm_error <- abs(testing$pred_glm - testing$answer_recode)
+testing$predict_lm_error <- abs(testing$pred_lm - testing$answer_recode)
+```
+
+Mean error in binomal model: `r round(mean(testing$predict_glm_error), 2)`
+
+Mean error in linear model: `r round(mean(testing$predict_lm_error), 2)`
+
+```{r}
+t <- t.test(testing$predict_glm_error, testing$predict_lm_error, paired = T)
+```
+
+T-test: t(`r round(t$parameter, 2)`) = `r round(t$statistic, 2)`, p = `r round(t$p.value, 3)`

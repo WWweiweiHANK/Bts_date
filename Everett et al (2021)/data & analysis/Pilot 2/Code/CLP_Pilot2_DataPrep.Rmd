@@ -1,0 +1,495 @@
+---
+title: "COVID-19 Leader Perceptions Pilot 2 (Data Preparation)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: FALSE
+---
+
+<script>
+$(document).ready(function() {
+  $items = $('div#TOC li');
+  $items.each(function(idx) {
+    num_ul = $(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+<style type="text/css">
+.table {
+    width: 80%;
+}
+</style>
+
+# Data Loading and Setup
+
+## Package and Function Loading
+```{r}
+library(dplyr)
+library(tidyr)
+library(mgsub)
+library(kableExtra)
+library(summarytools)
+```
+
+## Load Data
+```{r}
+datafile <- "../Data/CLP_Pilot2_RawData.csv"
+header <- scan(datafile, nlines = 1, sep=",", what = character())
+raw_data <- read.csv(datafile, header = FALSE, col.names = header, 
+                     sep=",",na.strings=c("NA", ""),dec=".")[-(1:3),]
+```
+
+# Data Wrangling
+
+## Step 1: Renaming
+
+```{r}
+# Rename used variables
+data <- raw_data %>% rename("prolific_id" = QID145,
+                       "consent_age" = Q123,
+                       "consent_survey" = QID129,
+                       
+                       "gender" = QID126,
+                       "age" = QID127,
+                       "race" = QID251,
+                       "education" = QID252,
+                       "income" = QID122,
+                       "pol_ideology" = QID123,
+                       "religiosity" = QID125,
+                       
+                       "number_covid_studies" = QID157,
+                       "similarity_covid_studies" = QID158,
+                       
+                       "covid_concern" = QID130,
+                       "covid_cases_personal" = QID131,
+                       
+                       "check_attention" = Q274,
+
+                       "redcross_reliable" = Q279,
+                       "check_embezzle_clear" = Q250,
+                       
+                       "feedback_unclear" = QID142,
+                       "feedback_comment" = QID143,
+                       
+                       "argument" = Decision,
+                       "which_argument" = FL_77_DO) %>% 
+  
+  # Rename scenarios
+  rename_all(gsub, pattern = '^L_', replacement = 'IH_lockdown_') %>%
+  rename_all(gsub, pattern = '^V_', replacement = 'IH_ventilator_') %>%
+  rename_all(gsub, pattern = '^M_', replacement = 'IB_medicine_') %>%
+  rename_all(gsub, pattern = '^P_', replacement = 'IB_ppe_') %>% 
+  
+  # Rename moral arguments
+  rename_all(gsub, pattern = '_C_', replacement = '_consq_') %>% 
+  rename_all(gsub, pattern = '_D_', replacement = '_deon_') %>% 
+
+  # Rename dependent variables
+  rename_all(gsub, pattern = '_trust_1', replacement = '_trustworthy') %>% 
+  rename_all(gsub, pattern = '_trust_2', replacement = '_trustOther')
+
+```
+
+## Step 2: Recoding
+
+### Demographic variables
+
+Recode gender into 3 categories: Male, Female, Other 
+
+```{r}
+# Gender
+data$gender_recode <- recode(data$gender,   
+                            "Female" = "Female",
+                            "Male" = "Male",
+                            .default = "Other") # All others listed
+print(table(data$gender_recode))
+```
+
+Recode race into 4 categories: White, Black, Asian, Other 
+
+```{r}
+## Recode  into 4 categories: 
+data$race_recode <- recode(data$race,
+                          "White" = "White",
+                          "Black or African American" = "Black",
+                          "Asian" = "Asian",
+                          .default = "Other") # All others listed
+
+print(table(data$race_recode))
+```
+
+Recode education:
+
+```{r}
+# Education
+data$education <- recode(data$education,
+                         "High school" = "1",
+                         "Some college" = "2",
+                         "2 year degree" = "3",
+                         "4 year degree" = "4",
+                         "Postgraduate/Professional degree or other" = "5")
+print(table(data$education))
+```
+
+Recode income:
+
+```{r}
+# Income
+data$income <- recode(data$income,
+                      "Under $5,000" = "1",
+                      "$5,000-$10,000" = "2",
+                      "$10,001-$15,000" = "3",
+                      "$15,001-$25,000" = "4",
+                      "$25,001-$35,000" = "5",
+                      "$35,001-$50,000" = "6",
+                      "$50,001-$65,000" = "7",
+                      "$65,001-$80,000" = "8",
+                      "$80,001-$100,000" = "9",
+                      "Over $100,000" = "10")
+print(table(data$income))
+```
+
+Recode religiosity:
+
+```{r}
+# Religiosity
+data$religiosity <- recode(data$religiosity,
+                         "Not at all religious" = "1",
+                         "Somewhat religious" = "4",
+                         "Very religious" = "7")
+print(table(data$religiosity))
+```
+
+Recode Political Ideology:
+
+```{r}
+# Politics
+data$pol_ideology <- recode(data$pol_ideology,
+                         "Very liberal/left" = "1",
+                         "Moderate" = "4",
+                         "Very conservative/right" = "7")
+print(table(data$pol_ideology))
+```
+
+Recode OUS: an example
+
+```{r}
+# OUS
+data <- data %>% 
+ mutate_at(.funs=list(~recode(., 
+                              "Strongly disagree" = "1", 
+                              "Disagree" = "2",
+                               "Somewhat disagree" = "3",
+                               "Neither agree nor disagree" = "4",
+                               "Somewhat agree" = "5",
+                               "Agree" = "6",
+                               "Strongly agree" = "7")), 
+            vars(starts_with("OUS"))) %>%
+  mutate_at(vars(starts_with("OUS")), as.numeric)
+print(table(data$OUS1))
+```
+
+Recode Red Cross Reliability:
+
+```{r}
+# Red Cross reliability
+data$redcross_reliable <- recode(data$redcross_reliable,
+                         "Not reliable at all" = "1",
+                         "Somewhat reliable" = "3",
+                         "Very reliable" = "5")
+print(table(data$redcross_reliable))
+```
+
+Recode COVID concern:
+
+```{r}
+# Covid concern
+data$covid_concern <- recode(data$covid_concern,
+                         "1Not at all" = "1",
+                         "7Very much" = "7")
+print(table(data$covid_concern))
+```
+
+### Trust DV corrections
+
+```{r}
+# Miscoded:
+data$IB_medicine_consq_trustOther <- recode(data$IB_medicine_consq_trustOther,
+                                        "2" = "3",
+                                        "8" = "2")
+# Recode
+data <- data %>% 
+ mutate_at(.funs=list(~recode(., 
+                              "Not at all trustworthy" = "1", 
+                              "Somewhat trustworthy" = "4", 
+                              "Extremely trustworthy" = "7")), 
+            vars(matches("trustworthy"))) %>% 
+  mutate_at(.funs=list(~recode(., 
+                              "Not at all likely" = "1", 
+                              "Somewhat likely" = "4", 
+                              "Extremely likely" = "7")), 
+            vars(matches("trustOther"))) %>% 
+  mutate_at(.funs=list(~recode(., 
+                               "Absolutely morally wrong" = "1",
+                               "Neither right nor wrong" = "4",
+                               "Absolutely morally right" = "7")), 
+            vars(matches("Moral"))) %>%
+  mutate_at(.funs=list(~recode(.,
+        "Indifferent" = "4",
+        "Strongly support keeping the lockdown" = "1",
+        "Strongly support reopening" = "7",
+        "Strongly support U.S.-made medicine being reserved for protecting American citizens" = "1",
+        "Strongly support U.S.-made medicine being given to whoever needs most" = "7",
+        "Strongly support U.S.-made PPE being reserved for protecting American citizens" = "1",
+        "Strongly support U.S.-made PPE being given to whoever needs most" = "7",
+        "Strongly support everyone having equal access to treatment" = "1",
+        "Strongly support prioritizing younger and healthier people for treatment" = "7")), 
+        vars(matches("Support")))
+
+```
+
+### Behavioral DV
+
+We recode the DVs for the behavioral questions based on the order in which the response options were presented.
+
+```{r}
+data <- data %>% 
+ mutate_at(.funs=list(~recode(substr(., 1, 8), 
+                              "Person 1" = "Utilitarian", "Person 2" = "Non-Utilitarian")), 
+            vars(matches("_CD_"))) %>% 
+  mutate_at(.funs=list(~recode(substr(., 1, 8), 
+                               "Person 1" = "Non-Utilitarian", "Person 2" = "Utilitarian")), 
+            vars(matches("_DC_")))
+```
+
+
+## Step 3: Exclusions
+
+### Test Cases
+
+```{r}
+# How many?
+n <- nrow(filter(data, DistributionChannel == "preview"))
+
+# Filter out
+data <- filter(data, DistributionChannel != "preview")
+```
+
+After removing `r n` test cases there are now `r nrow(data)` cases. 
+
+### Unfinished surveys
+
+```{r}
+# How many?
+n <- nrow(filter(data, Finished != "True"))
+
+# Filter out
+data <- filter(data, Finished == "True")
+```
+
+After removing `r n` unfinished cases there are now `r nrow(data)` cases. 
+
+### Duplicates 
+
+#### Based on IP address
+
+```{r}
+data <- arrange(data, RecordedDate)     # Order by Date/Time
+
+# How many?
+n <- nrow(filter(data, duplicated(IPAddress, fromLast=FALSE)))
+
+# Filter out
+data <- filter(data, !duplicated(IPAddress, fromLast=FALSE)) 
+```
+
+After removing `r n` duplicate IP address cases there are now `r nrow(data)` cases. 
+
+#### Based on Prolific ID
+
+```{r}
+# How many?
+n <- nrow(filter(data, duplicated(prolific_id, fromLast=FALSE)))
+
+# Filter out
+data <- filter(data, !duplicated(prolific_id, fromLast=FALSE)) 
+```
+
+After removing `r n` duplicate Prolific ID cases there are now `r nrow(data)` cases. 
+
+### Consent Failers
+
+```{r}
+# How many?
+n <- nrow(filter(data, !(consent_age == "Yes" & consent_survey == "Yes")))
+
+# Filter out
+data <- filter(data, consent_age == "Yes" & consent_survey == "Yes")
+```
+
+After removing `r n` failed consent cases there are now `r nrow(data)` cases. 
+
+### Attention Failers
+
+```{r}
+# How many?
+n <- nrow(filter(data, !check_attention == "Strongly disagree"))
+
+# Filter out
+data <- filter(data, check_attention == "Strongly disagree")
+```
+
+After removing `r n` failed attention check cases, there are now `r nrow(data)` cases. 
+
+### Completion Time Failers
+
+```{r}
+# How many?
+n <- nrow(filter_at(data, vars(matches('_Page\\.Submit')), all_vars(. <= 1 | is.na(.))))
+
+# Filter out
+data <- filter_at(data, vars(matches('_Page\\.Submit')), all_vars(. > 1 | is.na(.)))
+```
+
+After removing `r n` fast responders, there are now `r nrow(data)` cases. 
+
+### Flag Comprehension Check Failers
+
+```{r}
+# How many?
+n <- nrow(filter(data, check_embezzle_clear != "Yes"))
+
+# Flag
+data <- data %>%
+  mutate(exclude_behav = ifelse(check_embezzle_clear == "No", 1, 0))
+```
+`r n` participants flagged for exclusion for reporting confusion in the behavioral task.
+
+### Remove Nonsense & Unclear Free Responses
+
+```{r}
+problematic <- c("Carrots.",
+                "good",
+                "I had lost track of the leader situation. ",
+                "My US address is in Oregon, but I live abroad in Japan. If you need US citizens exclusively in the US I think you need to specify that when setting up the study as well as writing that in your study intro just in case (I do try to check so sorry if I missed it!)")
+
+# How many?
+n <- length(problematic)
+
+# Filter out
+data <- filter(data, !(feedback_unclear %in% problematic))
+data <- filter(data, !(feedback_comment %in% problematic))
+```
+
+After removing `r n` participants for responding with nonsense or reporting problems, there are now `r nrow(data)` cases. 
+
+
+## Step 4: Manual Corrections
+
+```{r}
+# Flag behavioral task-specific responses
+data <- data %>%
+  mutate(exclude_behav = if_else((!is.na(feedback_comment) & 
+                                   feedback_comment == "Was the Red Cross donation real or fake?"), 
+                                 1, exclude_behav))
+
+# Rescale to liberal
+data <- data %>%
+  mutate(pol_ideology = if_else((!is.na(feedback_comment) & 
+                                  feedback_comment == "I accidentally marked that I consider myself conservative!! Meant to hit liberal, sorry!"), "1", pol_ideology))
+
+```
+
+## Step 5: Remove identifying & useless info
+
+```{r results='hide'}
+# Remove columns from final dataframe
+data <- data %>% select(-c(StartDate:consent_survey, check_attention,
+                             feedback_unclear, feedback_comment,
+                             QID126_5_TEXT, QID254, which_argument:OUS_DO,
+                             matches('_First\\.Click'), matches('_Last\\.Click'),
+                             matches('_Click\\.Count'), matches('_Page\\.Submit'),
+                             PROLIFIC_PID, STUDY_ID, SESSION_ID))
+```
+***
+
+
+## Step 6: Convert to long format
+
+```{r}
+data_long <- data %>% 
+  mutate(subId=as.numeric(row.names(.))) %>% 
+  gather(measure, answer, -c(covid_concern:subId)) %>%
+  separate(measure, c('dimension', "dilemma", "measure"), "_", extra = "merge") %>%
+  separate(measure, c('extra', 'measure'), "_", fill="left") %>%
+  select(-extra) %>%
+  filter(!is.na(answer)) %>%
+  spread(measure, answer)
+kable(head(select(data_long, subId:trustworthy)))
+```
+
+## Step 7: Create Composite Measures
+
+### Overall Trust
+
+We create a composite measure of trust by combining the two trust DVs, separately for each participant & dilemma.
+
+```{r}
+data_long <- data_long %>%
+  mutate(trustworthy = as.numeric(trustworthy), trustOther = as.numeric(trustOther)) %>%
+  rowwise() %>% 
+  mutate(avg_trust = mean(c(trustworthy, trustOther)))
+kable(head(select(data_long, subId:avg_trust)))
+```
+
+### OUS
+
+We create composite OUS scores by combining the scale items for the IH (4 items) and IB sub-scales (5 items), separately for each participant.
+
+```{r}
+data_long <- data_long %>%
+  select(subId, OUS1:OUS9) %>% 
+  unique() %>%
+  group_by(subId) %>%
+  mutate(avg_OUS_IB = mean(OUS1:OUS5, na.rm = TRUE),
+        avg_OUS_IH = mean(OUS6:OUS9, na.rm = TRUE)) %>%
+  select(subId, avg_OUS_IB, avg_OUS_IH) %>%
+  merge(data_long, by = "subId") 
+kable(head(select(data_long, subId, contains("OUS"))))
+```
+
+## Step 8: Save Data
+
+Rearrange columns for the final dataframe to be used and save to csv
+```{r}
+
+data_long <-rename(data_long, support = Support, moral = Moral)
+data_long$argument <- recode(data_long$argument, "Consequentialist" = "Utilitarian", 
+                             "Deontological" = "Non-Utilitarian")
+
+# Rearrange column order to subID, demographics, behavioral DV, self-report DVs
+data_long <- data_long %>% relocate('subId') %>%    # As first column
+  relocate(names(data_long)[grep('avg_OUS', names(data_long))], .after='exclude_behav') 
+print(colnames(data_long))
+write.csv(data_long, file = "../Data/CLP_Pilot2_Data_Long.csv", 
+          row.names=FALSE)
+```
+
+## View Data Summary
+```{r}
+
+knitr::opts_chunk$set(results = "asis")
+data_long %>% 
+  dfSummary(graph.magnif = 3) %>%
+  print(max.tbl.height = 500,
+      method = "render")
+
+```

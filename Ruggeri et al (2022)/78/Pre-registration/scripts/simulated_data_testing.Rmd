@@ -1,0 +1,767 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This document will reproduce the pilot analysis of "The globalizability of temporal discounting (and its relationship with economic inequality)", submitted to Nature Human Behavior.
+
+## Utility functions
+
+The following functions are necessary to handle data wrangling as well as to compute the different scores.
+
+```{r}
+get_scores <- function (x) {
+  
+  ## This function will compute the total temporal discount for each participant based on their responses to each block question
+  ##
+  ## Input (x): A block of questions (5 previous questions to the one parsed to the function)
+  ##
+  ## Output: Vector of individual sum responses per block
+
+   f <- as.numeric(gsub("block", "", x$block))[1]
+   
+   if (f == 1) {
+   x %>% 
+   mutate(score = case_when(
+    amount_later == 750 & choice == 1 ~ 5,
+    amount_later == 750 & choice == 0 ~ 4,
+    amount_later == 600 & choice == 1 ~ 3,
+    amount_later == 510 & choice == 0 ~ 2,
+    amount_later == 505 & choice == 0 ~ 1,
+    amount_later == 505 & choice == 1 ~ 0
+   ))
+     
+  } else if (f == 2) {
+    x %>% 
+    mutate(score = case_when(
+    amount_later == 750 & choice == 1 ~ 1,
+    amount_later == 750 & choice == 0 ~ 0,
+    amount_later == 600 & choice == 0 ~ 2,
+    amount_later == 510 & choice == 1 ~ 3,
+    amount_later == 505 & choice == 0 ~ 4,
+    amount_later == 505 & choice == 1 ~ 5
+    ))
+  } else {
+    x %>% 
+    mutate(score = case_when(
+    amount_later == 7500 & choice == 1 ~ 5,
+    amount_later == 7500 & choice == 0 ~ 4,
+    amount_later == 6000 & choice == 1 ~ 3,
+    amount_later == 5100 & choice == 0 ~ 2,
+    amount_later == 5050 & choice == 0 ~ 1,
+    amount_later == 5050 & choice == 1 ~ 0
+    ))  
+    }
+}
+
+get_latest_answer <- function (x, y){
+  
+  ## This function will obtain the latest answer given to the initial baseline questions. This function is necessary to control for the different possible options shown to each individual.
+  ##
+  ## Input: (x) A data frame including choices to questions; (y) a scalar identifying the next item following the item block. 
+  ##
+  ## Output: Vector of individual responses to the anomaly item
+  
+    x %>% 
+    group_by(ResponseId) %>% 
+    filter(as.numeric(gsub("Q", "", question)) < y) %>% 
+    arrange(desc(as.numeric(gsub("Q", "", question)))) %>% 
+    slice(1) %>% 
+    ungroup() %>% 
+    select(ResponseId, choice, amount_later, block)
+}
+
+get_second_choices <- function (x, y) {
+  
+    ## This function will obtain the answer given to the anomalies questions. This function necessary to control for the different possible options shown to each individual
+  ##
+  ## Input: (x) A data frame including choices to questions; (y) the anomaly item identifier. 
+  ##
+  ## Output: Vector of individual responses to the anomaly item
+  
+  x %>% 
+  arrange(desc(as.numeric(gsub("Q", "", question)))) %>%   
+  filter(question == y) %>% 
+  select(choice) %>% 
+  unlist() %>% 
+  as.vector()
+}
+
+
+fixer_anom <- function (d){
+  
+   ## This function will compute whether an anomaly was observed and if the anomaly/not anomaly was observed for a response favoring an initial sooner or later reward
+  ##
+  ## Input: (x) A data frame including the first choice (fc) and if an anomaly was produced (anom). 
+  ##
+  ## Output: Vector of individual responses indicating the type of anomaly/not anomaly observed.
+  
+  d %>%
+  mutate(response = case_when (
+     fc == 0 & anom == 0 ~ "No anomaly sooner",
+     fc == 1 & anom == 0 ~ "No anomaly later",
+     fc == 0 & anom == 1 ~ "Anomaly sooner",
+     fc == 1 & anom == 1 ~ "Anomaly later")) %>% 
+    mutate (response = as.factor(response)) %>% 
+    select(response)
+  }
+
+```
+
+```{r}
+if (!require("tidyverse")) install.packages("tidyverse")
+if (!require("haven")) install.packages("haven")
+if (!require("mvtnorm")) install.packages("mvtnorm")
+if (!require("lme4")) install.packages("lme4")
+if (!require("lmerTest")) install.packages("lmerTest")
+if (!require("here")) install.packages("here")
+if (!require("sjstats")) install.packages("sjstats")
+if (!require("sjPlot")) install.packages("sjPlot")
+if (!require("performance")) install.packages("performance")
+if (!require("see")) install.packages("see")
+if (!require("patchwork")) install.packages("patchwork")
+if (!require("parameters")) install.packages("parameters")
+if (!require("emmeans")) install.packages("emmeans")
+```
+
+```{r}
+library("tidyverse")
+library("haven")
+library("mvtnorm")
+library("lme4")
+library("lmerTest")
+library("here")
+library("sjstats")
+library("sjPlot")
+library("performance")
+library("see")
+library("patchwork")
+library("parameters")
+library("emmeans")
+```
+
+
+## Data generation process
+
+### Data cleaning
+
+In this section we upload the dataset simulated from Qualtrics. We transform age from born year and the positive deviant status. Positive deviants are defined as individuals who were born with an below average financial status and currently have an above average income. 
+
+```{r}
+dat <- zap_labels(read.csv(here("Submission", "data", "simulated_pilot_data.csv")))
+```
+
+
+```{r}
+dat <- dat %>%
+       mutate(ResponseId = row_number()) %>% 
+       rename(pay_bills = Q22_2,
+             pay_fun = Q22_3,
+             pay_save = Q22_4,
+             pay_invest = Q22_5,
+             vac_vs_sal = Q23,
+             expect = Q24,
+             bills_handl = Q25,
+             income = Q26_1,
+             debt = Q26_2,
+             assets = Q26_3,
+             pandemic = Q27,
+             financial_status = Q28,
+             child = Q29,
+             age = Q30,
+             gender = Q31,
+             education = Q32,
+             employment = Q33,
+             Q17 = Common.difference,
+             Q18 = Subadditivity,
+             Q19 = Delay.speedup,
+            ) %>% 
+  mutate (age = 2021-age) %>%
+  mutate (pdev = case_when(
+    str_detect(child, "poor") | str_detect(child, "Poor") & income >= mean(income) ~ 3 ,
+    str_detect(child, "poor") | str_detect(child, "Poor") & income < mean(income) ~ 1,
+    TRUE ~ 2
+  )) %>% 
+  mutate_if(is.character,as.factor)
+```
+
+We clean the data an adapt the questions to be processed in future analysis. We obtain individual choices (0 = sooner, 1 = later) for each question, adding item characteristics (i.e., amount presented for the sooner and later rewards, delay presented for sooner and later rewards, question identifier, block identifier). This step is important, as we need to control for the different options seen by each individual during the questionnaire. 
+
+```{r}
+dat_item <- 
+    dat %>% 
+      mutate(amount_later17 = case_when(
+          Q2 == "Receiving $550 in 12 months" & Q5 == "Receiving $500 right now" ~ 550,
+          Q3 == "Receiving $600 in 12 months" ~ 600,
+          Q4 == "Receiving $500 right now" | Q4 == "Receiving $750 in 12 months" ~ 750,
+          Q5 == "Receiving $510 in 12 months" & Q6 == "Receiving $500 right now" ~ 510,
+          Q6 == "Receiving $505 in 12 months" ~ 505)) %>% 
+     
+      mutate(amount_later18 = case_when(
+          Q2 == "Receiving $550 in 12 months" & Q5 == "Receiving $500 right now" ~ 1100,
+          Q3 == "Receiving $600 in 12 months" ~ 1200,
+          Q4 == "Receiving $750 in 12 months" | Q4 == "Receiving $500 right now" ~ 1500,
+          Q5 == "Receiving $510 in 12 months" & Q6 == "Receiving $500 right now" ~ 1020,
+          Q6 == "Receiving $505 in 12 months" ~ 1010)) %>% 
+      
+      mutate(amount_later19 = case_when(
+          amount_later18 == 505  ~ 495,
+          amount_later18 == 510  ~ 490,
+          amount_later18 == 550  ~ 450,
+          amount_later18 == 600  ~ 400,
+          amount_later18 == 750  ~ 250
+          )) %>% 
+
+      pivot_longer(Q2:Q19, 
+                 names_to = c("question")) %>%
+  
+      mutate (delay_sooner = rep(c(rep(0, 15), 12, 0, 12), length(unique(ResponseId))),
+              delay_later  = rep(c(rep(12, 15), 24, 24, 0),length(unique(ResponseId))),
+              amount_sooner = rep(c(rep(500, 10), 
+                                    rep(5000, 5),
+                                    rep(500, 3)), length(unique(ResponseId)))) %>% 
+   
+     mutate (choice = case_when(
+        str_detect(value, "500 right now") ~ 0,
+        str_detect(value, "5000 right now") ~ 0,
+        str_detect(value, "5500 in 12 months") ~ 1,
+        str_detect(value, "7500 in 12 months") ~ 1,
+        str_detect(value, "500 in 12 months") ~ 0,
+        TRUE  ~ 1
+      )) %>% 
+    
+    mutate (amount_later = case_when(
+        question == "Q2" | question == "Q7" ~ 550,
+        question == "Q3" | question == "Q8" ~ 600,
+        question == "Q4" | question == "Q9" ~ 750,
+        question == "Q5" | question == "Q10"~ 510,
+        question == "Q6" | question == "Q11"~ 505,
+        question == "Q12" ~ 5500,
+        question == "Q13" ~ 6000,
+        question == "Q14" ~ 7500,
+        question == "Q15" ~ 5100,
+        question == "Q16" ~ 5050,
+        question == "Q17" ~ amount_later17,
+        question == "Q18" ~ amount_later18,
+        question == "Q19" ~ amount_later19)) %>%
+  
+      mutate (question_num = as.numeric(gsub("Q", "", question))) %>%
+      
+      mutate ( block = case_when(
+        question_num < 7 ~ "block1",
+        question_num >= 7 & question_num < 12 ~ "block2",
+        question_num >= 11 & question_num < 17 ~ "block3",
+        question_num == 17 ~ "anom1",
+        question_num == 18 ~ "anom2",
+        question_num == 19 ~ "anom3",
+        )) %>% 
+
+  select(-value, -question_num, -amount_later17, -amount_later18, -amount_later19) %>%
+  drop_na(choice) %>% 
+  mutate_if(is.character,as.factor)
+```
+
+### Computing temporal discount scores and anomalies choices.
+
+We will create one dataset (dat_item), including all data at item level. We will employ this dataset to  to explore Q1-Q5 in the pilot data testing, as well as other granular effects and the estimation of the scores.
+
+```{r}
+scores <- get_scores(get_latest_answer(dat_item, 7))$score +
+          get_scores(get_latest_answer(dat_item, 12))$score +
+          get_scores(get_latest_answer(dat_item, 17))$score +
+          get_second_choices(dat_item, "Q17") +
+          get_second_choices(dat_item, "Q18") +
+          (1 - get_second_choices(dat_item, "Q19"))
+  
+comdif <-as.numeric(get_latest_answer(dat_item, 7)$choice != get_second_choices(dat_item,"Q17"))
+absolmag <- as.numeric(get_latest_answer(dat_item, 7)$choice !=as.numeric(get_latest_answer(dat_item, 17)$choice))
+gainloss <-as.numeric(get_latest_answer(dat_item, 7)$choice == as.numeric(get_latest_answer(dat_item, 12)$choice))
+delayspeed <-as.numeric(get_latest_answer(dat_item, 7)$choice ==get_second_choices(dat_item,"Q19"))
+subaddit <- as.numeric(get_latest_answer(dat_item, 7)$choice !=get_second_choices(dat_item,"Q18"))
+
+q <- dat_item %>% 
+  count(ResponseId) %>% 
+  arrange() 
+
+dat_item <- dat_item %>% 
+  arrange(ResponseId) %>%
+  mutate (score = rep(scores, q$n),
+          comdif = rep(comdif, q$n),
+          absolmag = rep(absolmag, q$n),
+          gainloss = rep(gainloss, q$n),
+          delayspeed = rep(delayspeed, q$n),
+          subaddit = rep(subaddit, q$n))
+
+rm(q,scores, comdif, absolmag, gainloss, delayspeed, subaddit)
+
+```
+
+### Generating effects for pilot data testing. 
+
+Prior to comparing these models, we need to simulate individual and country-level effects. First, we simulate random effects for the individual effects resembling medium effect size effects (standardized betas = -1/1 for GINI and GDP, respectively). To keep the example as simple as possible, only random-intercept variation at country-level and two country-level predictors (GDP and GINI). We further add fixed effects at individual level. This effects are drawn from low to medium effects. The effects are set to increase monotonically across the levels/variables, which is an unrealistic assumption with real analysis, but suited for demonstration effects. If we wish to introduce effects at a particular level, we could introduce a design matrix with particular effects. This example can be quickly adapted to introduce random-slope effects by modifying cov_mx and introduce the respective beta effect. Lastly, individual inequality is generated as the difference between current and country-level income. To maintain the original datset separated from the dataset used for future analysis, we introduce this modifications in the dat_modl dataframe.
+
+```{r}
+## Country assignment (random intercept)
+
+cov_mx  <- diag(2)
+cov_mx[,2] <- 0
+
+# generate the by-countyry random effects
+set.seed(33)
+n_country <- 20
+countries <- data.frame(country_id = seq_len(n_country),
+                         MASS::mvrnorm(n = n_country,
+                                       mu = c(T_0s = 0, T_1s = 0),
+                                       Sigma = cov_mx))
+
+b_12 <- -1
+b_22 <- 1
+
+b_11 <- .15
+b_21 <- -.15
+b_31 <- .20
+b_41 <- -.20
+b_51 <- .10
+b_61 <- -.10
+
+b_71 <- .30
+
+lv2_effs <- data.frame(GINI = rmvnorm(n = n_country, mean = c(GINI.T_0s = .50)),
+                       GDP  = rmvnorm(n = n_country, mean = c(GDP.T_0s = mean(dat_item$income))))
+
+countries <- countries %>% 
+  cbind(lv2_effs) %>% 
+  select(-c(T_1s,), T_0s, GINI.T_0s, GDP.T_0s) %>% 
+  mutate ( GINI.T_0s = scale(GINI.T_0s),
+                   GDP.T_0s = scale(GDP.T_0s)) %>% 
+  rename(GINI = GINI.T_0s,
+                   GDP = GDP.T_0s)
+
+countries <- sample_n(countries, 
+              length(unique(dat_item$ResponseId)), 
+              replace = T) %>%
+              mutate(ResponseId = row_number())
+
+dat_modl <- merge(dat_item, countries, by= "ResponseId")
+
+dat_modl <- dat_modl %>% 
+            group_by(country_id) %>% 
+                      mutate (indineq = income - mean(income)) %>% 
+                      ungroup() %>% 
+                   mutate (pdev = as.numeric(pdev), 
+                   gender = as.numeric(gender), 
+                   education = as.numeric(education),
+                   employment = as.numeric(employment),
+                   block = as.numeric(block),
+                   age = scale(age),
+                   indineq = scale(indineq)
+                   ) %>% 
+
+            mutate(new_score =  score + 
+                                T_0s + 
+                                pdev*b_11+
+                                age*b_21+
+                                gender*b_31+
+                                indineq*b_41+
+                                education*b_51+
+                                employment*b_61+
+                                block*b_71+
+                                GINI*b_12 + 
+                                GDP*b_22) %>% 
+           mutate (new_score = round(new_score, 0)) %>% 
+           mutate (new_score = replace(new_score, which(new_score < 0), 0))%>% 
+
+           mutate(new_comdif =  comdif + 
+                                T_0s + 
+                                pdev*b_11+
+                                age*b_21+
+                                gender*b_31+
+                                indineq*b_41+
+                                education*b_51+
+                                employment*b_61+
+                                block*b_71+
+                                GINI*b_12 + 
+                                GDP*b_22) %>% 
+           mutate (new_comdif = round(new_comdif, 2)) %>% 
+           mutate(pr =  1 / (1 + exp(-new_comdif))) %>% 
+           mutate(new_comdif =  rbinom(nrow(.), 1, pr)) %>% 
+      
+            mutate (pdev = as.factor(pdev), 
+                   gender = as.factor(gender), 
+                   education = as.factor(education),
+                   employment = as.factor(employment),
+                   block = as.factor(block),
+                   country_id = as.factor(country_id),
+                   new_comdif = as.factor(new_comdif))
+
+remo <- ls()
+rm(list = c(grep('b_', remo, value=TRUE), "remo", "cov_mx", "lv2_effs", "countries"))
+
+```
+
+
+## Descriptive graphics
+
+In this section we will compute figures 4 to 6. Figure 6 is additionally modified using graphical software, but principal results should be similar. The descriptions for each graphics are presented here and in text. 
+* Figure 4 represents the distribution of temporal discounting scores and anomaly choices at country-level. 
+* Figure 5 represents the proportion of choices (plus standard error) for choices across countries and items.
+* Figure 6 represents the number of decisions with regards to the common choice anomaly (yes or no) and for those decisions who were identified as anomalies, whether they were concurrent with the theoretical expectation or not. 
+
+
+### Code for Figure 4.
+
+```{r}
+des1 <- ggplot(dat_modl, 
+             aes(x = country_id, 
+                 y = new_score, 
+                 fill = country_id)) +
+             geom_violin(trim = F, bw = .6) + 
+                  stat_summary(
+                    fun.data = "mean_sdl",  fun.args = list(mult = 1), 
+                    geom = "pointrange", color = "black", size = 2) + 
+              ggtitle("Distribution of temporal discounting scores acoss countries") +
+              ylab("Temporal discounting scores") +
+              xlab("Country") +
+              ylim(0, 18)+
+              theme_bw(base_size = 20) +
+              theme(legend.position = "none")
+
+
+des2 <- ggplot(dat_modl, aes(x=country_id)) +
+        geom_bar(aes(fill=factor(new_comdif)),
+               position="fill") +
+              ggtitle("Distribution of common difference difference anomaly across countries ") +
+              ylab("Proportion of anomalies") +
+              xlab("Country") +
+              theme_bw(base_size = 20) +
+              theme(legend.position = "none") +
+        scale_fill_manual(values=c("slategray1",
+                               "slategray4"))
+
+des3 <- des1 / des2
+
+ggsave(des3, filename = "figure4.tiff",
+       width = 14,
+       height = 8,
+       device='tiff', dpi=700)
+```
+
+### Code for Figure 5.
+
+```{r}
+
+des7 <- dat_modl %>% 
+  mutate (question = fct_relevel(question,
+                                  "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8", "Q9",
+                                  "Q10", "Q11", "Q12", "Q13", "Q14", "Q15", "Q16", "Q17", "Q18", "Q19")) %>% 
+  mutate(question = fct_recode(question, 
+                               "Common Diff." = "Q17", 
+                               "Subaddit." = "Q18",
+                               "Delay-Speed" = "Q19",
+                               "Reward: $500 vs $500" = "Q2",
+                               "Reward: $500 vs $600" = "Q3",
+                               "Reward: $500 vs $7500" = "Q4",
+                               "Reward: $500 vs $510" = "Q5",
+                               "Reward: $500 vs $505" = "Q6",
+                               "Payment: $500 vs $550" = "Q7",
+                               "Payment: $500 vs $600" = "Q8",
+                               "Payment: $500 vs $750" = "Q9",
+                               "Payment: $500 vs $510" = "Q10",
+                               "Payment: $500 vs $505" = "Q11",
+                               "Reward: $5000 vs $5500" = "Q12",
+                               "Reward: $5000 vs $6000" = "Q13",
+                               "Reward: $5000 vs $7500" = "Q14",
+                               "Reward: $5000 vs $5100" = "Q15",
+                               "Reward: $5000 vs $5050" = "Q16"
+                               )) %>% 
+  ggplot(., 
+               aes(x = country_id,
+                 y = choice,
+                 colour = country_id)) +
+              stat_summary(
+                    fun.data = "mean_sdl",  
+                    fun.args = list(mult = 1), 
+                    geom = "pointrange",
+                    size = .8) + 
+              ggtitle("Distribution of temporal discount choices across countries and questions ") +
+              ylab("Proportion of latter option choices") +
+              xlab("Country") +
+              theme_bw(base_size = 16) +
+              theme(axis.text.x = element_text(size = 8),
+              legend.position = "none") +
+              facet_wrap(~ question)
+              
+ggsave(des7, filename = "figure5.tiff",
+       width = 14,
+       height = 8,
+       device='tiff', dpi=700)
+              
+              
+```
+
+
+### Code for Figure 6.
+
+```{r}
+
+comdif_an <- data.frame(fc = as.numeric(get_latest_answer(dat_modl, 7)$choice), 
+                     anom = dat_modl$new_comdif)
+
+dat_grap <- data.frame(fixer_anom(comdif_an)) 
+names(dat_grap) <- c("response")
+dat_grap <- cbind(dat_modl, dat_grap)
+ 
+des4 <- dat_grap %>% 
+  mutate(response = case_when(
+    response == "Anomaly later" ~ "Anomaly",
+    response == "Anomaly sooner" ~ "Anomaly",
+    response == "No anomaly later" ~ "No anomaly",
+    response == "No anomaly sooner" ~ "No anomaly"
+  )) %>% 
+  
+  mutate(response = fct_relevel(response, "No anomaly", "Anomaly")) %>% 
+  group_by(country_id) %>% 
+  count(response) %>% 
+  ggplot(aes(y = n,
+             x = response,
+             group = factor(response),
+             colour = factor(response))) +
+  geom_jitter(alpha = 0.9,
+             size = 7,
+             pch=19) +
+  ylim(0,800)+
+  stat_summary(fun.data = mean_cl_normal, 
+               geom = "pointrange",
+               size = 1, color = "black") +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "none")+
+  ylab("Number of decisions") +
+  xlab("Type of decision") +
+  scale_colour_manual(values=c(
+                               "slategray4",
+                               "limegreen"),
+                      name = "Type of anomaly")
+
+
+des5 <- dat_grap %>% 
+  filter(response == "Anomaly sooner" | response == "Anomaly later") %>% 
+  mutate(response = fct_recode(response, "Not congruent" = "Anomaly sooner", "Congruent" = "Anomaly later")) %>% 
+
+  group_by(country_id) %>% 
+  count(response) %>% 
+  ggplot(aes(y = n,
+             x = response,
+             group = factor(response),
+             colour = factor(response))) +
+  geom_jitter(alpha = 0.9,
+             size = 7,
+             pch=19) +
+  stat_summary(fun.data = mean_cl_normal, 
+               geom = "pointrange",
+               size = 1, color = "black") +
+  theme_bw(base_size = 20) +
+  theme(legend.position = "none")+
+  ylab("Number of anomaly decisions") +
+  xlab("Type of Anomaly decision") +
+  ylim(0,800)+
+  scale_colour_manual(values=c("darkolivegreen2",
+                               "darkolivegreen4"),
+                      name = "Type of anomaly")
+
+layout <- c(
+  area(t = 1, l = 1, b = 6, r = 3),
+  area(t = 1, l = 5, b = 8, r = 8))
+
+des6 <- des4 + des5 + 
+  plot_layout(design = layout)
+
+ggsave(des6, filename = "figure6.tiff",
+       width = 14,
+       height = 8,
+       device='tiff', dpi=700)
+
+rm(list = c("comdif_an", "layout"))
+
+```
+
+
+## Estimation of temporal discount effects
+
+In this section we will explore individual predictors of temporal discounting at individual and country-level. We will follow a sequential approach, where models including information at different levels will be introduced in different models. Models will be compared by means of likelihood ratio tests as well as AIC and BIC. For each model, we will further inspect hte intraclass correlation coefficient (ICC) and marginal explained variance. 
+
+We define the following models:
+
+* m1 = null model only including country-level random effects. 
+* m2 = model including item fixed effects (averaged at individual level) and country-level random effects. This model will allow us to investigate Q1-Q2.   
+* m3 = model including item fixed effects (averaged at individual level), fixed individual effects and country-level random effects.  
+* m4 = model including item fixed effects (averaged at individual level), fixed individual effects, fixed-county level effects and country-level random effects. We will use the results of this model to answer Q3-Q4.
+
+```{r}
+m1 <-   lmer(new_score ~ 
+                   (1|country_id), 
+                   data = dat_modl,
+                   control = lmerControl(optimizer = "bobyqa"))
+
+m2 <-   lmer(new_score ~ block +
+                   (1|country_id), 
+                   data = dat_modl,
+                   control = lmerControl(optimizer = "bobyqa"))
+
+m3 <-   lmer(new_score ~ 1 + block + pdev + gender + education + employment + indineq + age + 
+                   (1|country_id), 
+                   data = dat_modl,
+                   control = lmerControl(optimizer = "bobyqa"))
+
+m4 <-   lmer(new_score ~ 1 + block + pdev + gender + education + employment + indineq + age +
+                   GDP + GINI +(1|country_id), 
+                   data=dat_modl,
+                   control = lmerControl(optimizer = "bobyqa"))
+
+lrt1 <- pchisq(as.numeric(2*(logLik(m2)-logLik(m1))),1,lower=FALSE)
+lrt2 <- pchisq(as.numeric(2*(logLik(m3)-logLik(m2))),1,lower=FALSE)
+lrt3 <- pchisq(as.numeric(2*(logLik(m4)-logLik(m3))),1,lower=FALSE)
+
+compare_performance(m1,m2, m3, m4)
+```
+We can inspect model assumptions such as multicollinearity, homogeneity and normality of residual distribution or the presence of influential cases. In this case, all assumptions were observed to hold, and thus, we proceed to intepret model effects.
+
+```{r}
+check_model(m4)
+```
+
+
+We can inspect the results for each model in HTML format. If interested, we can inspect fixed effects and random effects using figures. 
+
+```{r}
+tab_model(m1, m2, m3, m4, 
+          show.aic = T)
+
+p11 <- plot_model(m4,
+                title = "Fixed effects for temporal discounting scores",
+                vline.color = "red",
+                axis.lim = c(-5.5, 5.5),
+                dot.size = 4,
+                line.size = 1.5,
+                ) +
+  theme_sjplot2(base_size = 20)
+
+ggsave(filename = "pilot_data_fe_cores.tiff",
+       width = 10,
+       height = 8,
+       device='tiff', dpi=700)
+
+p12 <- plot_model(m4, 
+                  type = "re", 
+                title = "Random effects for temporal discounting scores",
+                axis.lim = c(-5.5, 5.5),
+                dot.size = 4,
+                line.size = 1.5) +
+  theme_sjplot2(base_size = 20)
+
+ggsave(filename = "pilot_data_re_cores.tiff",
+       width = 10,
+       height = 8,
+       device='tiff', dpi=700)
+
+p13 <- plot_model(m4, 
+                type = "pred", terms = c("indineq"),
+                title = "Fixed effect of indineq in temporal discounting scores",
+                dot.size = 4,
+                line.size = 1.5) +
+  theme_sjplot2(base_size = 20)+ 
+  scale_color_sjplot(pal = "us")
+
+ggsave(filename = "pilot_data_fe_indineq.tiff",
+       width = 10,
+       height = 8,
+       device='tiff', dpi=700)
+
+```
+
+To answer Q4, we need to further conduct post-hoc test for the positive deviants groups. We apply the multivariant-t distribution adjustment to compute p-values. 
+
+```{r}
+pdev_contrasts <- contrast(emmeans(m4, "pdev"), "pairwise", adj = "mvt")
+
+```
+
+
+## Estimation of anomaly effects
+
+In this section we will explore individual predictors of anomalies at individual and country-level. We will follow a similar approach than in the previous section, with the exception that generalized hierarchical models will be applied in this case. Again, models will be compared by means of likelihood ratio tests as well as AIC and BIC. For each model, we will further inspect hte intraclass correlation coefficient (ICC) and marginal explained variance. Again, we can inspect the results for each model in tidy HTML format.
+
+We define the following models:
+
+* mg1 = null model only including country-level random effects. 
+* mg2 = model including item fixed effects (averaged at individual level) and country-level random effects. This model will allow us to investigate Q1-Q2.   
+* mg3 = model including item fixed effects (averaged at individual level), fixed individual effects and country-level random effects.  
+* mg4 = model including item fixed effects (averaged at individual level), fixed individual effects, fixed-county level effects and country-level random effects. We will use the results of this model to answer Q5.
+
+```{r}
+mg1 <-   glmer(new_comdif ~ 
+                   (1|country_id), 
+                   data = dat_modl,
+                   control = glmerControl(optimizer = "bobyqa"),
+              family = "binomial")
+mg2 <-   glmer(new_comdif ~ block + 
+                   (1|country_id), 
+                   data = dat_modl,
+                   control = glmerControl(optimizer = "bobyqa"),
+              family = "binomial")
+
+mg3 <-   glmer(new_comdif ~ 1 + block + pdev + gender + education + employment + indineq + age + 
+                   (1|country_id), 
+                   data = dat_modl,
+                   control = glmerControl(optimizer = "bobyqa"),
+              family = "binomial")
+
+mg4 <-   glmer(new_comdif ~ 1 + block +  pdev + gender + education + employment + indineq + age +
+                   GDP + GINI +(1|country_id), 
+                   data=dat_modl,
+                   control = glmerControl(optimizer = "bobyqa"),
+              family = "binomial")
+
+lrt2 <- pchisq(as.numeric(2*(logLik(mg2)-logLik(mg1))),1,lower=FALSE)
+lrt3 <- pchisq(as.numeric(2*(logLik(mg3)-logLik(mg2))),1,lower=FALSE)
+lrt4 <- pchisq(as.numeric(2*(logLik(mg4)-logLik(mg3))),1,lower=FALSE)
+
+compare_performance(m1, m2, m3, m4)
+
+tab_model(mg1, mg2, mg3, mg4,
+          transform = "exp",
+          show.aic = T)
+```
+
+
+## Analyzing anomaly choices across countries and whether choices are congruent with the theory.
+
+Lastly, we will explore descriptive differences for pooled sample and country-level differences in engaging in anomalies. For each anomaly, we further explore whether the anomaly is produced when the individual selected the sooner or the latter reward in the first choice. This will indicate the extent that the anomalies are present and the degree of congruency of those choices with the previous theory. To understand the extent that these decisions vary across country-level, we will generate two generalized linear models. The first (ano1) provides a extent that anomaly presence vary at country-level. The second model (ano2) will illustrate the variation of congruency with the theory at country level. Future analyses, including all anomalies (and not only common differnece) will include similar models but with anomaly as an additional individual level effect.
+
+```{r}
+
+## Common difference
+
+ano1 <- dat_grap %>% 
+  mutate(ResponseId = as.factor(ResponseId)) %>% 
+  mutate(response = fct_collapse(response, 
+                                  anom = c("Anomaly sooner", "Anomaly later"),
+                                  noanom = c("No anomaly sooner", "No anomaly later"),
+                                 )) %>% 
+  mutate(response = fct_relevel(response, "noanom", "anom")) %>% 
+  glmer(response ~ 1 + (1|country_id), 
+           family = "binomial",
+           .)
+
+ano2 <- dat_grap %>% 
+  mutate(ResponseId = as.factor(ResponseId)) %>% 
+  filter(response == "Anomaly sooner" | response == "Anomaly later") %>% 
+  mutate(response = fct_recode(response, "Not congruent" = "Anomaly sooner", "Congruent" = "Anomaly later")) %>% 
+  mutate(response = fct_relevel(response, "Not congruent", "Congruent")) %>% 
+ glmer(response ~ 1 + (1|country_id), 
+           family = "binomial",
+           .)
+
+tab_model(ano1, ano2)
+```
+
+

@@ -1,0 +1,880 @@
+---
+title: "COVID-19 Leader Perceptions Registered Report (Data Checks)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: FALSE
+---
+
+<script>
+$(document).ready(function() {
+  $items = $('div#TOC li');
+  $items.each(function(idx) {
+    num_ul = $(this).parentsUntil('#TOC').length;
+    $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+  });
+
+});
+</script>
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(tidy = FALSE, fig.align='left')
+kable <- function(data) {
+  knitr::kable(data, format = "html", digits = 2) %>%
+        kable_styling(bootstrap_options = "striped", full_width = F,
+                      position = "left")
+}
+```
+
+```{r}
+rand_seed = 828
+set.seed(rand_seed)
+```
+
+# Setup
+
+## Package Loading
+
+```{r, message=F}
+library(dplyr)
+library(tidyr)
+library(mgsub)
+library(kableExtra)
+library(summarytools)
+library(qualtRics)
+library(ggplot2)
+library(psych)
+library(ggcorrplot)
+```
+
+## Plot Setup
+
+```{r}
+theme_set(theme_test() +
+          theme(panel.border = element_blank(),
+                plot.title = element_text(hjust = 0.5),
+                axis.title = element_text(size = 13, face='bold'),
+                axis.title.x = element_text(margin = margin(10, 0, 0, 0)),
+                axis.title.y = element_text(margin = margin(0, 10, 0, 0)),
+                axis.line = element_line(color='gray20'),
+                axis.ticks = element_blank(),
+                strip.background = element_blank(),
+                strip.text = element_text(face = 'bold', size=12),
+                panel.spacing = unit(1, "lines")))
+```
+
+## Data Loading
+
+```{r}
+raw_data <- read.csv("raw_data.csv", na.strings = "NOTAVAIL")
+```
+
+First day: `r min(raw_data$StartDate)`
+
+Last day: `r max(raw_data$StartDate)`
+
+
+# Exclusions
+
+## Exclude unfinished, previews, no consent
+
+Removing `r nrow(filter(raw_data, Status == "Survey Preview"))` previews
+
+Removing `r nrow(filter(raw_data, Finished != TRUE))` unfinished surveys
+
+Removing `r nrow(filter(raw_data, consent_age != "Yes"))` < 18 cases
+
+Removing `r nrow(filter(raw_data, consent_agree != "Yes"))` unconsenting cases
+
+```{r}
+raw_data %>%
+  filter(# Remove Preview
+          Status!="Survey Preview",
+          # Completes only
+          Finished==TRUE,
+          # Consented
+          consent_age == "Yes", consent_agree == "Yes") -> data
+```
+
+Remaining subjects `r nrow(data)`
+
+Of these, `r nrow(filter(data, !is.na(Q236_Click.Count)))` completed the study
+
+Check: `r nrow(filter(data, surveyName %in% c("U.S.", "U.K.") | attention_check2 == "Roses can suffer with pests like aphids and blackfly"))`
+
+## Compute duplicates
+
+(Also removes participant IDs from the dataframe)
+
+```{r}
+data %>%
+  group_by(IPAddress) %>%
+  mutate(countIPtmp = n()) %>%
+  group_by(rid) %>%
+  mutate(countIDtmp = n()) %>%
+  rowwise() %>% 
+  mutate(countIP = ifelse(is.na(IPAddress), 1, countIPtmp),
+         countID = ifelse(is.na(rid), 1, countIDtmp)) %>%
+  ungroup() %>%
+  select(-rid) -> data
+```
+
+## Exclude attention check fails
+
+Removing `r nrow(filter(data, attention_check != "TikTok"))` people who failed attention check 1
+
+Of these, `r nrow(filter(data, !is.na(Q236_Click.Count), attention_check != "TikTok"))` completed the study
+
+```{r}
+data <- filter(data, attention_check == "TikTok")
+```
+
+Removing `r nrow(filter(data, attention_check2 != "Roses can suffer with pests like aphids and blackfly"))` people who failed attention check 2
+
+Of these, `r nrow(filter(data, !is.na(Q236_Click.Count), attention_check2 != "Roses can suffer with pests like aphids and blackfly"))` completed the study
+
+```{r}
+data <- filter(data, attention_check2 == "Roses can suffer with pests like aphids and blackfly")
+```
+
+Remaining subjects `r nrow(data)`
+
+## Exclusion 1: IP/ID
+
+Removing `r nrow(filter(data, countIP != 1))` duplicate IPs
+
+Removing `r nrow(filter(data, countID != 1))` duplicate IDs
+
+(`r nrow(filter(data, countID != 1 | countIP != 1))` unique)
+
+```{r}
+data <- filter(data, countIP == 1, countID == 1)
+```
+
+## Exclusion 2: Country
+
+```{r}
+data %>%
+  mutate(country=recode(country, "United Arab Emirates" = "UAE",
+                        "The Netherlands" = "Netherlands",
+                        "Kingdom of Saudi Arabia" = "KSA",
+                        "United Kingdom" = "U.K.",
+                        "United States" = "U.S.",
+                        "South Korea" = "Korea")) %>%
+  group_by(surveyName, country) %>%
+  summarise(counts= n()) %>%
+  ggplot(aes(x=surveyName, y=country, fill=counts)) +
+  geom_tile(color='black') +
+  theme(axis.text.x = element_text(angle=90))
+```
+
+Removing `r nrow(filter(data, country == "Other"))` in different country
+
+Removing `r nrow(filter(data, is.na(country)))` did not answer
+
+```{r}
+data <- filter(data, (country != "Other" & !is.na(country)))
+```
+
+```{r}
+data %>%
+  mutate(country=recode(country, "United Arab Emirates" = "UAE",
+                        "The Netherlands" = "Netherlands",
+                        "Kingdom of Saudi Arabia" = "KSA",
+                        "United Kingdom" = "U.K.",
+                        "United States" = "U.S.",
+                        "South Korea" = "Korea")) %>%
+  group_by(surveyName, country) %>%
+  summarise(counts= n()) %>%
+  ggplot(aes(x=surveyName, y=country, fill=counts)) +
+  geom_tile(color='black') +
+  theme(axis.text.x = element_text(angle=90))
+```
+
+## Exclusion 3: >50% of qs
+
+```{r}
+data %>%
+  ungroup() %>%
+  select(subId, gender, age, contains("_trust"), OUS1:OUS9, 
+         contains("_behav"), contains("_Support"), contains("_Moral"),
+         beh_compr, self_comp, starts_with("covid_"),
+         country, education, ses2, politics, religious, unicef) %>%
+  # 3Moral + 3Support + 4Trust + 1Voting + 2compr = 13
+  # 9OUS + 5covid = 14
+  # gender + age + education + ses = 4
+  # country + politics + religion + unicef = 4
+  # sub Id
+  # Total: 36
+  mutate(count_na = rowSums(is.na(.)),
+         respMoreHalfKey = if_else(count_na > 36/2, 1, 0)) %>%
+  select(subId, respMoreHalfKey, count_na) %>%
+  right_join(data, by='subId') -> data
+```
+
+Removing `r nrow(filter(data, respMoreHalfKey == 0))` responded to less than half of key questions
+
+```{r}
+# Moral & Support: 6/10
+# Beh: 1/10
+# Trust: 4/20
+table(data$count_na-(10-6)-(10-1)-(20-4), useNA="always") %>%
+  kable()
+```
+
+```{r}
+data %>%
+  select(subId, count_na) %>%
+  mutate(count_na_ok=count_na-(10-6)-(10-1)-(20-4)) %>%
+  ggplot(aes(x=count_na_ok)) +
+  geom_histogram(binwidth = 1, color='black') +
+  xlab("N Unanswered Questions")
+```
+
+```{r}
+data <- filter(data, (respMoreHalfKey == 1 | is.na(respMoreHalfKey)))
+```
+
+Remaining N Post Exclusions: `r nrow(data)`
+
+
+# Rename & Recode variables
+
+```{r}
+data %>%
+  mutate(g_age=paste(substr(gender, 1, 1), age_category, sep='_'),
+         CompSCheck = if_else(self_comp %in% c("How much I trusted the mayor",
+                                               "How much I trusted the official"), "Pass", "Fail"),
+         CompSCheck = if_else(is.na(CompSCheck), "Fail", CompSCheck),
+         CompBCheck =  if_else(beh_compr == "The leader can transfer the full donation to UNICEF or take some of the money for themselves.", "Pass", "Fail"),
+         CompBCheck = if_else(is.na(CompBCheck), "Fail", CompBCheck),
+         nPassed = ifelse(CompSCheck == "Pass" & CompBCheck == "Pass", 2, 
+                          ifelse(CompSCheck == "Fail" & CompBCheck == "Fail", 0, 1))) %>%
+  group_by(surveyName) %>%
+  mutate(CountryTotal = n()) -> data
+```
+
+(Of which `r nrow(filter(data, nPassed == 0))` failed both comp checks)
+
+```{r}
+data %>% 
+  
+  rename("argument" = Decision) %>% 
+  
+  mutate_at(.funs=list(~recode(., 
+        "Indifferent" = "4",
+        "Strongly support keeping the prolonged restrictions" = "1",
+        "Strongly support lifting the restrictions" = "7",
+        "Strongly support the tracing devices being voluntary" = "1",
+        "Strongly support the tracing devices being mandatory" = "7",
+        "Strongly support everyone having equal access to treatment" = "1",
+        "Strongly support prioritizing younger and healthier people for treatment" = "7")),
+        vars(matches("Support"))) %>%
+          
+  mutate(M_Support = gsub("Strongly support .*-made medicine being reserved for treating .* citizens", "1", M_Support),
+         M_Support = gsub("Strongly support .*-made medicine being given to whoever needs it most", "7", M_Support),
+         P_Support = gsub("Strongly support .*-made PPE being reserved for protecting .* citizens", "1", P_Support),
+         P_Support = gsub("Strongly support .*-made PPE being given to whoever needs it most", "7", P_Support)) %>%
+             
+  mutate_at(.funs=list(~recode(., 
+        "Absolutely morally wrong" = "1",
+        "Neither right nor wrong" = "4",
+        "Absolutely morally right" = "7")),
+        vars(matches("Moral"))) %>%
+ 
+mutate_at(.funs=list(~recode(., 
+        "Not at all trustworthy" = "1",
+        "Somewhat trustworthy" = "4",
+        "Extremely trustworthy" = "7")),
+        vars(matches("trust_1"))) %>%
+  
+  mutate_at(.funs=list(~recode(., 
+        "Not at all likely" = "1",
+        "Somewhat likely" = "4",
+        "Extremely likely" = "7")),
+        vars(matches("trust_2"))) %>%
+  
+  mutate_at(.funs=list(~as.numeric(.)),
+        vars(matches("Support", "Moral", "trust_1", "trust_2"))) %>%
+  
+  mutate_at(.funs=list(~recode(substr(., 1, 8), 
+                              "Person 1" = "Utilitarian", "Person 2" = "Non-Utilitarian")), 
+            vars(matches("_CD_"))) %>% 
+  mutate_at(.funs=list(~recode(substr(., 1, 8), 
+                               "Person 1" = "Non-Utilitarian", "Person 2" = "Utilitarian")), 
+            vars(matches("_DC_"))) %>%
+  
+  # OUS
+  mutate_at(.funs=list(~recode(., 
+                               "Strongly disagree" = "1", 
+                               "Disagree" = "2",
+                               "Somewhat disagree" = "3",
+                               "Neither agree nor disagree" = "4",
+                               "Somewhat agree" = "5",
+                               "Agree" = "6",
+                               "Strongly agree" = "7")), 
+            vars(starts_with("OUS") & !ends_with("DO"))) %>%
+  mutate_at(vars(starts_with("OUS") & !ends_with("DO")), as.numeric) %>%
+  
+  # Rename scenarios
+  rename_all(gsub, pattern = '^L_', replacement = 'IH_lockdown_') %>%
+  rename_all(gsub, pattern = '^V_', replacement = 'IH_ventilator_') %>%
+  rename_all(gsub, pattern = '^T_', replacement = 'IH_tracing_') %>%
+  rename_all(gsub, pattern = '^M_', replacement = 'IB_medicine_') %>%
+  rename_all(gsub, pattern = '^P_', replacement = 'IB_ppe_') %>% 
+  
+  # Rename moral arguments
+  rename_all(gsub, pattern = '_C_', replacement = '_util_') %>% 
+  rename_all(gsub, pattern = '_D_', replacement = '_nonutil_') %>% 
+
+  # Rename dependent variables
+  rename_all(gsub, pattern = '_trust_1', replacement = '_trustworthy') %>% 
+  rename_all(gsub, pattern = '_trust_2', replacement = '_trustOther') -> data
+
+```
+
+```{r}
+data$gender_recode <- recode(data$gender,   
+                            "Female" = "Female",
+                            "Male" = "Male",
+                            .default = "Other") # All others listed
+
+data$religious <- recode(data$religious,
+                         "Not at all religious" = "1",
+                         "Somewhat religious" = "4",
+                         "Very religious" = "7")
+
+data$politics <- recode(data$politics,
+                         "Left" = "1",
+                         "Right" = "7")
+
+data$covid_e_conc <- recode(data$covid_e_conc,
+                         "Not at all" = "1",
+                         "Very much" = "7")
+
+data$covid_h_c <- recode(data$covid_h_c,
+                         "Not at all" = "1",
+                         "Very much" = "7")
+
+data$covid_stud <- recode(data$covid_stud,
+                         "1-5" = "1",
+                         "6-10" = "2",
+                         "11-20" = "3",
+                         "21-50" = "4",
+                         "more than 50" = "5",
+                         "I don't remember" = "6")
+
+data$covid_sim <- recode(data$covid_sim,
+                         "Not at all similar" = "1",
+                         "Slightly similar" = "2",
+                         "Moderately similar" = "3",
+                         "Very similar" = "4",
+                         "Extremely similar" = "5")
+
+data$unicef <- recode(data$unicef,
+                         "Not reliable at all" = "1",
+                         "Somewhat reliable" = "3",
+                         "Very reliable" = "5")
+```                
+
+# Comprehension Check Failures by Condition
+
+### Self-Report Task
+
+```{r}
+data %>%
+  mutate(DO_fac = recode(FL_77_DO, 
+                         "FL_79" = "Consequentialist",
+                         "FL_78" = "Deontological")) %>%
+  group_by(surveyName, DO_fac, CompSCheck) %>%
+  summarise(counts = n()) %>%
+  filter(CompSCheck == "Fail") -> tmp
+min <- min(tmp$counts)
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=DO_fac, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white') +
+  xlab("SelfReport Task Condition") +
+  ylab("Country") +
+  scale_fill_gradient(limits=c(min, max)) + 
+  ggtitle("SRep Comp Check Fails by Condition") +
+  theme(axis.line.x = element_blank(),
+        axis.line.y = element_blank())
+```
+
+### Voting Task
+
+```{r}
+data %>%
+  filter(CompBCheck == "Fail") %>%
+  mutate(DO_fac = recode(FL_266_DO, 
+                         "FL_267" = "IH Behavioral",
+                         "FL_269" = "IB Behavioral")) %>%
+  group_by(surveyName, DO_fac) %>%
+  summarise(counts = n()) -> tmp
+min <- min(tmp$counts)
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=DO_fac, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white') +
+  xlab("Voting Task Condition") +
+  ylab("Country") +
+  ggtitle("Voting Comp Check Fails by Condition") +
+  scale_fill_gradient(limits=c(min, max)) +
+  theme(axis.line.x = element_blank(),
+        axis.line.y = element_blank())
+```
+
+
+# Other Data Checks
+
+## Devices
+
+```{r}
+data %>%
+  mutate(`meta_Operating.System` = gsub('[[:digit:]]+|[[:punct:]]| |(CrOS).*|(Linux).*', '', `meta_Operating.System`),
+         `meta_Operating.System` = gsub('CPUiPhoneOSlikeMacOSX', 'iPhone', `meta_Operating.System`)) %>%
+  {table(.$surveyName, .$`meta_Operating.System`)} %>%
+  kable()
+```
+
+## Languages
+
+```{r}
+data %>%
+  group_by(surveyName) %>%
+  mutate(TotalCounts= n()) %>%
+  group_by(surveyName, UserLanguage, TotalCounts) %>%
+  summarise(counts= n()) %>%
+  mutate(Perc = counts*100/TotalCounts) %>%
+  ggplot(aes(x=surveyName, y=UserLanguage, fill=Perc)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = round(Perc)), color='white') +
+  theme(axis.text.x = element_text(angle=90))
+```
+
+## Responses distributions
+
+```{r}
+for (dv in c("Support", "Moral", "trustworthy", "trustOther")) {
+  data %>% 
+    select(surveyName, contains(dv)) %>%
+    gather(Q, A, -surveyName) %>%
+    separate(Q, into=c("Dimension", "Dilemma", "Q", extra='merge')) %>%
+    filter(!is.na(A)) %>%
+    group_by(surveyName, Q, A) %>%
+    summarise(counts = n()) -> tmp
+  max <- max(tmp$counts)
+  tmp %>%
+    ggplot(aes(x=A, y=surveyName, fill=counts)) +
+    geom_tile(color='black') +
+    theme(axis.text.x = element_text(angle=90)) +
+    scale_fill_gradient(limits=c(0, max)) +
+    xlab(dv) +
+    ylab("Country") -> p
+  print(p)
+}
+```
+
+## Order randomization 
+
+```{r}
+for (fac in c("attention_check_DO", "attention_check2_DO",
+              "beh_compr_DO", "self_comp_DO", "OUS_DO")) {
+  data %>%
+    mutate(DO_fac = as.integer(as.factor(get(fac)))) %>%
+    group_by(surveyName, DO_fac) %>%
+    mutate(counts = n())  -> tmp
+  max <- max(tmp$counts)
+  tmp %>%
+    ggplot(aes(x=DO_fac, y=surveyName, fill=counts)) +
+    geom_tile(color='black') +
+    theme(axis.text.x = element_text(angle=90)) +
+    xlab(gsub("_DO", " Randomization", fac)) +
+    scale_fill_gradient(limits=c(0, max)) -> p
+  print(p)
+}
+```
+
+## Condition randomization 
+
+```{r}
+data %>%
+  select(subId, surveyName, contains(c("_behav", "trustworthy"))) %>% 
+  gather(q, a, -subId, -surveyName) %>%
+  separate(q, into=c('dimension', 'dilemma', 'task'), sep="_", extra='merge') %>% 
+  filter(!is.na(a)) %>%
+  group_by(surveyName, dilemma, task) %>%
+  summarise(counts = n()) -> tmp
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=task, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white', size=2.5) +
+  theme(axis.text.x = element_text(angle=90)) +
+  facet_wrap(~dilemma, nrow=1) +
+  scale_fill_gradient(limits=c(0, max))
+```
+
+```{r}
+data %>%
+  select(subId, surveyName, contains(c("_Support", "_Moral"))) %>% 
+  gather(q, a, -subId, -surveyName) %>%
+  separate(q, into=c('dimension', 'dilemma', 'task'), sep="_", extra='merge') %>% 
+  filter(!is.na(a)) %>%
+  group_by(surveyName, dilemma, task) %>%
+  summarise(counts = n()) -> tmp
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=dilemma, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white') +
+  theme(axis.text.x = element_text(angle=90)) +
+  facet_wrap(~task) +
+  scale_fill_gradient(limits=c(0, max))
+```
+
+```{r}
+data %>%
+  filter(FL_266_DO == "FL_267") %>%
+  mutate(DO_fac = recode(FL_268_DO, 
+                         "FL_16" = "Tracing Behav + IB SRep",
+                         "FL_105" = "Ventilator Behav + IB SRep",
+                         "FL_217" = "Lockdown Behav + IB SRep")) %>%
+  group_by(surveyName, DO_fac) %>%
+  summarise(counts = n()) -> tmp
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=DO_fac, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  xlab("Dilemma Randomization IH")+
+  geom_text(aes(label = counts), color='white') +
+  scale_fill_gradient(limits=c(0, max)) +
+  theme(axis.text.x = element_text(angle = 45, vjust = .5, hjust=.5))
+```
+
+```{r}
+data %>%
+  filter(FL_266_DO == "FL_269") %>%
+  mutate(DO_fac = recode(FL_270_DO, 
+                         "FL_124" = "PPE Behav + IH SRep",
+                         "FL_149" = "Medicine Behav + IH SRep")) %>%
+  group_by(surveyName, DO_fac) %>%
+  summarise(counts = n()) -> tmp
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=DO_fac, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white') +
+  xlab("Task Randomization IB")+
+  scale_fill_gradient(limits=c(0, max))
+```
+
+```{r}
+data %>%
+  select(surveyName, subId, FL_73_DO, FL_106_DO, FL_218_DO, FL_125_DO, FL_150_DO) %>%
+  gather(Q, A, -surveyName, -subId) %>%
+  drop_na() %>% 
+  mutate(Q = recode(Q, "FL_73_DO" = "Tracing B",
+                     "FL_106_DO" = "Ventilator B", 
+                     "FL_218_DO" = "Lockdown B", 
+                     "FL_125_DO" = "PPE B",
+                     "FL_150_DO" = "Medicine B"),
+         taskOrder = recode(A, "FL_74|FL_75" = "Behav First",
+                      "FL_75|FL_74" = "SRep First",
+                      "FL_109|FL_107" = "SRep First",
+                      "FL_107|FL_109" = "Behav First",
+                      "FL_219|FL_225" = "Behav First",
+                      "FL_225|FL_219" = "SRep First",
+                      "FL_126|FL_128" = "Behav First",
+                      "FL_128|FL_126" = "SRep First",
+                      "FL_279|FL_151" = "SRep First",
+                      "FL_151|FL_279" = "Behav First")) -> tmp
+
+tmp %>%
+  select(-Q, -A) %>%
+  merge(data) -> data
+  
+tmp %>%
+  group_by(surveyName, Q, taskOrder) %>%
+  summarise(counts = n()) -> tmp
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=taskOrder, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white') +
+  xlab("Task Randomization")+
+  facet_wrap(~Q, nrow=1) +
+  scale_fill_gradient(limits=c(0, max)) +
+  theme(axis.text.x = element_text(angle=90))
+```
+
+```{r}
+data %>%
+  select(surveyName, subId, FL_73_DO, FL_106_DO, FL_218_DO, FL_125_DO, FL_150_DO) %>%
+  gather(Q, A, -surveyName, -subId) %>%
+  drop_na() %>% 
+  mutate(Q = recode(Q, "FL_73_DO" = "Tracing B",
+                     "FL_106_DO" = "Ventilator B", 
+                     "FL_218_DO" = "Lockdown B", 
+                     "FL_125_DO" = "PPE B",
+                     "FL_150_DO" = "Medicine B"),
+         taskOrder = recode(A, "FL_74|FL_75" = "Behav First",
+                      "FL_75|FL_74" = "SRep First",
+                      "FL_109|FL_107" = "SRep First",
+                      "FL_107|FL_109" = "Behav First",
+                      "FL_219|FL_225" = "Behav First",
+                      "FL_225|FL_219" = "SRep First",
+                      "FL_126|FL_128" = "Behav First",
+                      "FL_128|FL_126" = "SRep First",
+                      "FL_279|FL_151" = "SRep First",
+                      "FL_151|FL_279" = "Behav First")) -> tmp
+
+tmp %>%
+  select(-Q, -A) %>%
+  merge(data) -> data
+  
+data %>%
+  group_by(surveyName, taskOrder) %>%
+  summarise(counts = n()) -> tmp
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=taskOrder, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white') +
+  xlab("Task Randomization")+
+  scale_fill_gradient(limits=c(0, max)) 
+```
+
+```{r}
+data %>%
+  select(surveyName, FL_171_DO, FL_180_DO, FL_221_DO, FL_183_DO, FL_187_DO) %>%
+  gather(Q, A, -surveyName) %>%
+  drop_na() %>% 
+  separate(A, c("Dilemma", "Randomization"), sep="BehaviouralTask") %>%
+  mutate(Randomization=gsub("[()]", "", Randomization)) %>%
+  group_by(surveyName, Dilemma, Randomization) %>%
+  summarise(counts = n()) -> tmp
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=Randomization, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white') +
+  xlab("Behavioral Task Randomization")+
+  facet_wrap(~Dilemma, nrow=1) +
+  scale_fill_gradient(limits=c(0, max)) +
+  theme(axis.text.x = element_text(angle=90))
+```
+
+```{r}
+data %>%
+  select(surveyName, FL_76_DO, FL_110_DO, FL_226_DO, FL_129_DO, FL_280_DO) %>%
+  gather(Q, A, -surveyName) %>%
+  drop_na() %>% 
+  mutate(Q = recode(Q, "FL_76_DO" = "Tracing B",
+                     "FL_110_DO" = "Ventilator B", 
+                     "FL_226_DO" = "Lockdown B", 
+                     "FL_129_DO" = "Medicine B",
+                     "FL_280_DO" = "PPE B"),
+         A = recode(A,"FL_68|FL_24" = "Medicine+PPE",
+                      "FL_24|FL_68" = "PPE+Medicine", 
+                      "FL_111|FL_117" = "Medicine+PPE",
+                      "FL_117|FL_111" = "PPE+Medicine", 
+                      "FL_233|FL_227" = "Medicine+PPE",
+                      "FL_227|FL_233" = "PPE+Medicine", 
+                      "FL_250|FL_136" = "Lockdown+Ventilator",
+                      "FL_136|FL_250" = "Ventilator+Lockdown",
+                      "FL_130|FL_136" = "Tracing+Ventilator",
+                      "FL_136|FL_130" = "Ventilator+Tracing",
+                      "FL_250|FL_130" = "Lockdown+Tracing",
+                      "FL_130|FL_250" = "Tracing+Lockdown",
+                      "FL_287|FL_293" = "Lockdown+Ventilator",
+                      "FL_293|FL_287" = "Ventilator+Lockdown",
+                      "FL_281|FL_293" = "Tracing+Ventilator",
+                      "FL_293|FL_281" = "Ventilator+Tracing",
+                      "FL_281|FL_287" = "Tracing+Lockdown",
+                      "FL_287|FL_281" = "Lockdown+Tracing")) %>%
+  group_by(surveyName, Q, A) %>%
+  summarise(counts = n()) -> tmp
+max <- max(tmp$counts)
+tmp %>%
+  ggplot(aes(x=A, y=surveyName, fill=counts)) +
+  geom_tile(color='black') +
+  geom_text(aes(label = counts), color='white') +
+  xlab("Self Report Task")+
+  facet_wrap(~Q, nrow=1, scales = "free_x") +
+  scale_fill_gradient(limits=c(0, max)) +
+  theme(axis.text.x = element_text(angle=90))
+```
+
+## Demographic variables
+
+```{r}
+# Gender
+data %>%
+  ggplot(aes(x=gender_recode, fill=gender_recode)) +
+  geom_histogram(stat='count') +
+  facet_wrap(~surveyName) +
+  xlab("Gender") +
+  theme(axis.text.x = element_blank())
+```
+
+```{r}
+edu_info <- read.csv('education_recoding.txt', sep='\t')
+edu_info <- mutate(edu_info, education = gsub("’", "'", education))
+data <- mutate(data, education = gsub("’", "'", education))
+data <- left_join(data, edu_info, by=c("surveyName", "education"))
+
+for (dv in c("education_recode", "ses2", "religious", "politics")) {
+  titleDic <- c("education_recode"='Education', 
+                "ses2"='SocioEconomic Status',
+                "religious"="Religiosity",
+                "politics"="Politics")
+  data %>% 
+    ggplot(aes(x=as.numeric(get(dv)))) +
+    geom_histogram(binwidth = 1) +
+    facet_wrap(~surveyName) +
+    xlab(titleDic[dv]) -> p
+  print(p)
+}
+```
+
+## Other Variables
+
+```{r}
+for (dv in c("covid_e_conc", "covid_h_c", "covid_stud", "covid_sim", "unicef")) {
+  titleDic <- c("covid_e_conc"="Covid Concerns, Economic",
+                "covid_h_c"="Covid Concerns, Health",
+                "covid_stud"="N Covid Studies",
+                "covid_sim"="Similarity Covid Studies",
+                "unicef"="UNICEF Reliability")
+  data %>% 
+    ggplot(aes(x=as.numeric(get(dv)))) +
+    geom_histogram(binwidth = 1) +
+    facet_wrap(~surveyName) +
+    xlab(titleDic[dv]) -> p
+  print(p)
+}
+```
+
+### OUS
+
+```{r}
+data %>% 
+  rowwise() %>%
+  mutate(avg_OUS_IB=mean(c(OUS1, OUS2, OUS3, OUS4, OUS5), na.rm=T),
+         avg_OUS_IH=mean(c(OUS6, OUS7, OUS8, OUS9), na.rm=T),
+         sd_OUS=round(sd(c(OUS1, OUS2, OUS3, OUS4, OUS5, OUS6, OUS7, OUS8, OUS9)), 2)) -> data
+
+kable(head(select(data, subId, contains("OUS"), -religious, -OUS_DO)))
+```
+
+```{r}
+data %>%
+  ungroup() %>%
+  select(OUS1:OUS9) %>%
+  cor(use = "complete.obs") %>%
+  ggcorrplot(outline.col = "black", lab=T) +
+  geom_hline(yintercept = 5.5) +
+  geom_vline(xintercept = 5.5)
+```
+
+```{r}
+data %>%
+  ungroup() %>%
+  select(OUS1:OUS5) %>%
+  drop_na() %>%
+  psych::alpha() -> IB_alpha
+
+data %>%
+  ungroup() %>%
+  select(OUS6:OUS9) %>%
+  drop_na() %>%
+  psych::alpha() -> IH_alpha
+```
+
+IB reliability: `r round(IB_alpha$total$raw_alpha, 2)`
+
+IH reliability: `r round(IH_alpha$total$raw_alpha, 2)`
+
+# Save data
+
+## Wide Format
+
+```{r}
+data <- rename(data, 'subj_SES'="ses2", "education_text"="education",
+               "education"="education_recode",
+               "religiosity"="religious", "pol_ideology"="politics")
+
+data <- mutate(data, check_selfrep = recode(CompSCheck, "Pass" = 1, "Fail" = 0),
+               check_voting = recode(CompBCheck, "Pass" = 1, "Fail" = 0),
+               argument = recode(argument, "Consequentialist" = "Utilitarian", 
+                             "Deontological" = "Non-Utilitarian"))
+
+write.csv(data, "data_complete.csv", row.names = F)
+```
+
+```{r}
+data %>%
+  select(subId, check_selfrep, check_voting, argument, taskOrder,
+         gender_recode, age, education, subj_SES, pol_ideology, religiosity, country, 
+         contains("_behav"), contains("_trustOther"), contains("_trustworthy"), 
+         contains("_Moral"), contains("_Support")) -> data
+
+write.csv(data, "data_wideFormat.csv", row.names = F)
+```
+
+```{r}
+knitr::opts_chunk$set(results = "asis")
+data %>% 
+  select(-subId) %>%
+  dfSummary(na.col=F) %>%
+  print(max.tbl.height = 500,
+      method = "render")
+```
+
+## Long Format
+
+```{r}
+data %>% 
+  gather(measure, answer, -c(subId:country)) %>%
+  separate(measure, c('dimension', "dilemma", "measure"), "_", 
+           extra = "merge", fill="left") %>%
+  separate(measure, c('extra', 'measure'), "_", fill="left") %>%
+  select(-extra) %>%
+  filter(!is.na(answer)) %>%
+  spread(measure, answer) %>%
+  rename("support"="Support") -> data_long
+```
+
+Add the Composite Measure of trust
+
+```{r}
+data_long %>%
+  mutate(trustworthy = as.numeric(trustworthy), 
+         trustOther = as.numeric(trustOther)) %>%
+  rowwise() %>% 
+  mutate(avg_trust = mean(c(trustworthy, trustOther))) -> data_long
+kable(head(arrange(select(data_long, dimension:avg_trust), trustOther)))
+```
+
+```{r}
+write.csv(data_long, file = "data.csv", row.names=FALSE)
+```
+
+```{r}
+knitr::opts_chunk$set(results = "asis")
+data_long %>% 
+  select(-subId) %>%
+  dfSummary(na.col=F) %>%
+  print(max.tbl.height = 500,
+      method = "render")
+```

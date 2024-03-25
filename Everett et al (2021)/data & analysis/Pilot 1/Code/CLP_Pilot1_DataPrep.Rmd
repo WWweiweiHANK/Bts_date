@@ -1,0 +1,766 @@
+---
+title: "COVID-19 Leader Perceptions Pilot 1 (Data Preparation)"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output:
+  html_document:
+    theme: flatly
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float: 
+      collapsed: FALSE
+---
+##Package and Function Loading
+```{r results='hide', message=FALSE, warning=FALSE}
+library(knitr)
+library(psych)
+library(summarytools)
+library(kableExtra)
+library(tidyverse)
+```
+
+## Load Data
+```{r results='hide'}
+df.raw <- read.csv("../Data/CLP_Pilot1_RawData.csv",
+                   header=TRUE, stringsAsFactors=FALSE)
+```
+There are `r nrow(df.raw)` cases and `r ncol(df.raw)` variables in the file. 
+
+## Renaming and Recoding
+```{r, message=FALSE}
+# Remove the unecessary extra variables from the dataframe and filter out preview
+df1a <- df.raw %>% dplyr::select(-StartDate, -EndDate, -Status, -Progress,
+                        -Duration..in.seconds.,
+                        -ResponseId, -RecipientLastName, -RecipientFirstName,
+                        -RecipientEmail, -ExternalReference, -LocationLatitude,
+                        - LocationLongitude, -UserLanguage, -Finished, 
+                        -ends_with("Click"), -ends_with("Count")) %>%
+                   filter(DistributionChannel != "preview")
+
+#str(df.raw, list.len=ncol(df.raw))
+  
+# Rename variables
+df1 <- df1a %>% rename("consent_1" = QID128,
+                       "consent_2" = QID129,
+                       "prolific_id" = QID145,
+                       
+                       "lockdown_support" = V1_Support,
+                       "lockdown_wrong" = V1_Wrong,
+                       "lockdown_deon_trustworthy_v1" = V1_D1_Q1,
+                       "lockdown_deon_trust_other_v1" = V1_D1_Q2,
+                       "lockdown_deon_share_v1" = V1_D1_Q3,
+                       "lockdown_deon_share_media_v1" = V1_D1_Q4,
+                       "lockdown_consq_trustworthy_v1" = V1_C1_Q1,
+                       "lockdown_consq_trust_other_v1" = V1_C1_Q2,
+                       "lockdown_consq_share_v1" = V1_C1_Q3,
+                       "lockdown_consq_share_media_v1" = V1_C1_Q4,
+                       "lockdown_deon_trustworthy_v2" = V1_D2_Q1,
+                       "lockdown_deon_trust_other_v2" = V1_D2_Q2,
+                       "lockdown_deon_share_v2" = V1_D2_Q3,
+                       "lockdown_deon_share_media_v2" = V1_D2_Q4,
+                       "lockdown_consq_trustworthy_v2" = V1_C2_Q1,
+                       "lockdown_consq_trust_other_v2" = V1_C2_Q2,
+                       "lockdown_consq_share_v2" = V1_C2_Q3,
+                       "lockdown_consq_share_media_v2" = V1_C2_Q4,
+                       
+                       "ventilator_support" = V2_Support,
+                       "ventilator_wrong" = V2_Wrong,
+                       "ventilator_deon_trustworthy_v1" = V2_D1_Q1,
+                       "ventilator_deon_trust_other_v1" = V2_D1_Q2,
+                       "ventilator_deon_share_v1" = V2_D1_Q3,
+                       "ventilator_deon_share_media_v1" = V2_D1_Q4,
+                       "ventilator_consq_trustworthy_v1" = V2_C1_Q1,
+                       "ventilator_consq_trust_other_v1" = V2_C1_Q2,
+                       "ventilator_consq_share_v1" = V2_C1_Q3,
+                       "ventilator_consq_share_media_v1" = V2_C1_Q4,
+                       "ventilator_deon_trustworthy_v2" = V2_D2_Q1,
+                       "ventilator_deon_trust_other_v2" = V2_D2_Q2,
+                       "ventilator_deon_share_v2" = V2_D2_Q3,
+                       "ventilator_deon_share_media_v2" = V2_D2_Q4,
+                       "ventilator_consq_trustworthy_v2" = V2_C2_Q1,
+                       "ventilator_consq_trust_other_v2" = V2_C2_Q2,
+                       "ventilator_consq_share_v2" = V2_C2_Q3,
+                       "ventilator_consq_share_media_v2" = V2_C2_Q4,
+                       
+                       "ppe_support" = V3_Support,
+                       "ppe_wrong" = V3_Wrong,
+                       "ppe_deon_trustworthy_v1" = V3_D1_Q1,
+                       "ppe_deon_trust_other_v1" = V3_D1_Q2,
+                       "ppe_deon_share_v1" = V3_D1_Q3,
+                       "ppe_deon_share_media_v1" = V3_D1_Q3.1,
+                       "ppe_consq_trustworthy_v1" = V3_C1_Q1,
+                       "ppe_consq_trust_other_v1" = V3_C1_Q2,
+                       "ppe_consq_share_v1" = V3_C1_Q3,
+                       "ppe_consq_share_media_v1" = V3_C1_Q4,
+                       "ppe_deon_trustworthy_v2" = V3_D2_Q1,
+                       "ppe_deon_trust_other_v2" = V3_D2_Q2,
+                       "ppe_deon_share_v2" = V3_D2_Q3,
+                       "ppe_deon_share_media_v2" = V3_D2_Q4,
+                       "ppe_consq_trustworthy_v2" = V3_C2_Q1,
+                       "ppe_consq_trust_other_v2" = V3_C2_Q2,
+                       "ppe_consq_share_v2" = V3_C2_Q3,
+                       "ppe_consq_share_media_v2" = V3_C2_Q4,
+                       
+                       "tracing_support" = V4_Support,
+                       "tracing_wrong" = V4_Wrong,
+                       "tracing_deon_trustworthy_v1" = V4_D1_Q1,
+                       "tracing_deon_trust_other_v1" = V4_D1_Q2,
+                       "tracing_deon_share_v1" = V4_D1_Q3,
+                       "tracing_deon_share_media_v1" = V4_D1_Q4,
+                       "tracing_consq_trustworthy_v1" = V4_C1_Q1,
+                       "tracing_consq_trust_other_v1" = V4_C1_Q2,
+                       "tracing_consq_share_v1" = V4_C1_Q3,
+                       "tracing_consq_share_media_v1" = V4_C1_Q4,
+                       "tracing_deon_trustworthy_v2" = V4_D2_Q1,
+                       "tracing_deon_trust_other_v2" = V4_D2_Q2,
+                       "tracing_deon_share_v2" = V4_D2_Q3,
+                       "tracing_deon_share_media_v2" = V4_D2_Q4,
+                       "tracing_consq_trustworthy_v2" = V4_C2_Q1,
+                       "tracing_consq_trust_other_v2" = V4_C2_Q2,
+                       "tracing_consq_share_v2" = V4_C2_Q3,
+                       "tracing_consq_share_media_v2" = V4_C2_Q4,
+                       
+                       "medicine_support" = V5_Wrong, #incorrectly labelled in qualtrics
+                       "medicine_wrong" = V5_Support, #incorrectly labelled in qualtrics
+                       "medicine_deon_trustworthy_v1" = V5_D1_Q1,
+                       "medicine_deon_trust_other_v1" = V5_D1_Q2,
+                       "medicine_deon_share_v1" = V5_D1_Q3,
+                       "medicine_deon_share_media_v1" = V5_D1_Q4,
+                       "medicine_consq_trustworthy_v1" = V5_C1_Q1,
+                       "medicine_consq_trust_other_v1" = V5_C1_Q2,
+                       "medicine_consq_share_v1" = V5_C1_Q3,
+                       "medicine_consq_share_media_v1" = V5_C1_Q4,
+                       "medicine_deon_trustworthy_v2" = V5_D2_Q1,
+                       "medicine_deon_trust_other_v2" = V5_D2_Q2,
+                       "medicine_deon_share_v2" = V5_D2_Q3,
+                       "medicine_deon_share_media_v2" = V5_D2_Q4,
+                       "medicine_consq_trustworthy_v2" = V5_C2_Q1,
+                       "medicine_consq_trust_other_v2" = V5_C2_Q2,
+                       "medicine_consq_share_v2" = V5_C2_Q3,
+                       "medicine_consq_share_media_v2" = V5_C2_Q4,
+                       
+                       "covid_concern" = QID130,
+                       "covid_cases_personal" = QID131,
+                       
+                       "gender" = QID126,
+                       "age" = QID127,
+                       "race" = Q164,
+                       "education" = Q162,
+                       "income" = QID122,
+                       "political_ideology" = QID123,
+                       "pol_party" = Q168,
+                       "religious" = QID125,
+                       "social_media" = socialmedia,
+                       "number_covid_studies" = QID157,
+                       "similarity_covid_studies" = QID158,
+                       
+                       "timing_1" = Q207_Page.Submit,
+                       "timing_2" = Q208_Page.Submit,
+                       "timing_3" = Q209_Page.Submit,
+                       "timing_4" = Q210_Page.Submit,
+                       "timing_5" = Q211_Page.Submit,
+                       "timing_6" = Q212_Page.Submit,
+                       "timing_7" = Q213_Page.Submit,
+                       "timing_8" = Q214_Page.Submit,
+                       "timing_9" = Q215_Page.Submit,
+                       "timing_10" = Q216_Page.Submit,
+                       "timing_11" = Q217_Page.Submit,
+                       "timing_12" = Q218_Page.Submit,
+                       "timing_13" = Q219_Page.Submit,
+                       "timing_14" = Q220_Page.Submit,
+                       "timing_15" = Q221_Page.Submit,
+                       "timing_16" = Q222_Page.Submit,
+                       "timing_17" = Q223_Page.Submit,
+                       "timing_18" = Q224_Page.Submit,
+                       "timing_19" = Q225_Page.Submit,
+                       "timing_20" = Q226_Page.Submit,
+                       "timing_21" = Q227_Page.Submit,
+                       "timing_22" = Q228_Page.Submit,
+                       "timing_23" = Q229_Page.Submit,
+                       "timing_24" = Q230_Page.Submit,
+                       "timing_25" = Q231_Page.Submit,
+                       "timing_26" = Q232_Page.Submit,
+                       "timing_27" = Q233_Page.Submit,
+                       "timing_28" = Q234_Page.Submit,
+                       "timing_29" = Q235_Page.Submit,
+                       "timing_30" = Q236_Page.Submit,
+                       
+                       "order_dilemmas" = FL_6_DO,
+                       "order_lockdown" = FL_7_DO,
+                       "order_ventilators" = FL_15_DO,
+                       "order_ppe" =  FL_26_DO,
+                       "order_tracing" = FL_37_DO,
+                       "order_medicine" = FL_70_DO)
+```
+
+We do some recoding for the demographics.
+
+```{r}
+# Gender
+df1$gender <- as_factor(df1$gender)
+df1$gender <- fct_recode(df1$gender,
+                         "Male" = "1", 
+                         "Female" = "2",
+                         "Nonbinary" = "3",
+                         "Prefer not to say" = "4",
+                         "Other" = "5")
+
+df1$gender_recode <- as_factor(df1$gender)
+df1$gender_recode <- fct_recode(df1$gender_recode,
+                       "Male" = "Male",
+                       "Female" = "Female",
+                       "Other" = "Nonbinary",
+                       "Other" = "Prefer not to say",
+                       "Other" = "2,5")
+
+# Race
+df1$race <- as_factor(df1$race)
+df1$race <- fct_recode(df1$race,
+                       "White" = "1",
+                       "Asian" = "2",
+                       "Black / African / Caribbean" = "3",
+                       "Mixed / Multiple ethnic groups" = "5",
+                       "Other Ethnic Group" = "4")
+
+df1$race_recode <- as_factor(df1$race)
+df1$race_recode <- fct_recode(df1$race_recode,
+                       "White" = "White",
+                       "Black" = "Black / African / Caribbean",
+                       "Asian" = "Asian",
+                       "Other" = "Mixed / Multiple ethnic groups",
+                       "Other" = "Other Ethnic Group")
+
+# Covid studies
+df1$number_covid_studies <- as_factor(df1$number_covid_studies)
+df1$number_covid_studies <- fct_recode(df1$number_covid_studies,
+                                       "0" = "1",
+                                       "1-5" = "2",
+                                       "6-10" = "3",
+                                       "11-20" = "4",
+                                       "21-50" = "5",
+                                       "50+" = "6")
+
+# Covid personal cases
+df1$covid_cases_personal <- as_factor(df1$covid_cases_personal)
+df1$covid_cases_personal <- fct_recode(df1$covid_cases_personal,
+                            "Yes" = "1",
+                            "No" = "2",
+                            "Unsure" = "3")
+
+# Social media
+df1$social_media <- as_factor(df1$social_media)
+df1$social_media <- fct_recode(df1$social_media,
+                               "Yes" = "1",
+                               "No" = "2")
+
+# Education
+df1$education <- as_factor(df1$education)
+df1$education <- fct_recode(df1$education,
+                         "Less than Secondary School or High School" = "1", 
+                         "Secondary School or High School" = "2", 
+                         "College qualifications " = "3",
+                         "Bachelor's degree " = "4",
+                         "Master's degree" = "5",
+                         "Doctorate degree" = "6")
+
+df1$education_num <- as.numeric(df1$education)
+```
+
+```{r}
+df1$order_lockdown <- as_factor(df1$order_lockdown)
+df1$order_lockdown <- fct_recode(df1$order_lockdown,
+                                 "Deontological First" = "LockdownVersion1",
+                                 "Consequentialist First" = "LockdownVersion2")
+
+df1$order_medicine <- as_factor(df1$order_medicine)
+df1$order_medicine <- fct_recode(df1$order_medicine,
+                                 "Deontological First" = "MedicineVersion1",
+                                 "Consequentialist First" = "MedicineVersion2")
+
+df1$order_ventilators <- as_factor(df1$order_ventilators)
+df1$order_ventilators <- fct_recode(df1$order_ventilators,
+                                 "Deontological First" = "MedicalCareVersion1",
+                                 "Consequentialist First" = "MedicalCareVersion2")
+
+df1$order_tracing <- as_factor(df1$order_tracing)
+df1$order_tracing <- fct_recode(df1$order_tracing,
+                                 "Deontological First" = "ContactTracingVersion1",
+                                 "Consequentialist First" = "ContactTracingVersion2")
+
+df1$order_ppe <- as_factor(df1$order_ppe)
+df1$order_ppe <- fct_recode(df1$order_ppe,
+                                 "Deontological First" = "PPEVersion1",
+                                 "Consequentialist First" = "PPEVersion2")
+```
+
+Then we need to create the variables for the DVs from the two order versions.
+
+```{r}
+# medicine
+df1$medicine_deon_trustworthy <- coalesce(df1$medicine_deon_trustworthy_v1,
+                                          df1$medicine_deon_trustworthy_v2)
+
+df1$medicine_consq_trustworthy <- coalesce(df1$medicine_consq_trustworthy_v1,
+                                          df1$medicine_consq_trustworthy_v2)
+
+
+df1$medicine_deon_trust_other <- coalesce(df1$medicine_deon_trust_other_v1,
+                                          df1$medicine_deon_trust_other_v2)
+
+df1$medicine_consq_trust_other <- coalesce(df1$medicine_consq_trust_other_v1,
+                                          df1$medicine_consq_trust_other_v2)
+
+df1$medicine_deon_share <- coalesce(df1$medicine_deon_share_v1,
+                                          df1$medicine_deon_share_v2)
+
+df1$medicine_consq_share <- coalesce(df1$medicine_consq_share_v1,
+                                          df1$medicine_consq_share_v2)
+
+df1$medicine_deon_share_media <- coalesce(df1$medicine_deon_share_media_v1,
+                                          df1$medicine_deon_share_media_v2)
+
+df1$medicine_consq_share_media <- coalesce(df1$medicine_consq_share_media_v1,
+                                          df1$medicine_consq_share_media_v2)
+
+# Ventilators
+df1$ventilator_deon_trustworthy <- coalesce(df1$ventilator_deon_trustworthy_v1,
+                                          df1$ventilator_deon_trustworthy_v2)
+
+df1$ventilator_consq_trustworthy <- coalesce(df1$ventilator_consq_trustworthy_v1,
+                                          df1$ventilator_consq_trustworthy_v2)
+
+
+df1$ventilator_deon_trust_other <- coalesce(df1$ventilator_deon_trust_other_v1,
+                                          df1$ventilator_deon_trust_other_v2)
+
+df1$ventilator_consq_trust_other <- coalesce(df1$ventilator_consq_trust_other_v1,
+                                          df1$ventilator_consq_trust_other_v2)
+
+df1$ventilator_deon_share <- coalesce(df1$ventilator_deon_share_v1,
+                                          df1$ventilator_deon_share_v2)
+
+df1$ventilator_consq_share <- coalesce(df1$ventilator_consq_share_v1,
+                                          df1$ventilator_consq_share_v2)
+
+df1$ventilator_deon_share_media <- coalesce(df1$ventilator_deon_share_media_v1,
+                                          df1$ventilator_deon_share_media_v2)
+
+df1$ventilator_consq_share_media <- coalesce(df1$ventilator_consq_share_media_v1,
+                                          df1$ventilator_consq_share_media_v2)
+
+
+# Lockdown
+df1$lockdown_deon_trustworthy <- coalesce(df1$lockdown_deon_trustworthy_v1,
+                                          df1$lockdown_deon_trustworthy_v2)
+
+df1$lockdown_consq_trustworthy <- coalesce(df1$lockdown_consq_trustworthy_v1,
+                                          df1$lockdown_consq_trustworthy_v2)
+
+
+df1$lockdown_deon_trust_other <- coalesce(df1$lockdown_deon_trust_other_v1,
+                                          df1$lockdown_deon_trust_other_v2)
+
+df1$lockdown_consq_trust_other <- coalesce(df1$lockdown_consq_trust_other_v1,
+                                          df1$lockdown_consq_trust_other_v2)
+
+df1$lockdown_deon_share <- coalesce(df1$lockdown_deon_share_v1,
+                                          df1$lockdown_deon_share_v2)
+
+df1$lockdown_consq_share <- coalesce(df1$lockdown_consq_share_v1,
+                                          df1$lockdown_consq_share_v2)
+
+df1$lockdown_deon_share_media <- coalesce(df1$lockdown_deon_share_media_v1,
+                                          df1$lockdown_deon_share_media_v2)
+
+df1$lockdown_consq_share_media <- coalesce(df1$lockdown_consq_share_media_v1,
+                                          df1$lockdown_consq_share_media_v2)
+
+# Tracing
+df1$tracing_deon_trustworthy <- coalesce(df1$tracing_deon_trustworthy_v1,
+                                          df1$tracing_deon_trustworthy_v2)
+
+df1$tracing_consq_trustworthy <- coalesce(df1$tracing_consq_trustworthy_v1,
+                                          df1$tracing_consq_trustworthy_v2)
+
+
+df1$tracing_deon_trust_other <- coalesce(df1$tracing_deon_trust_other_v1,
+                                          df1$tracing_deon_trust_other_v2)
+
+df1$tracing_consq_trust_other <- coalesce(df1$tracing_consq_trust_other_v1,
+                                          df1$tracing_consq_trust_other_v2)
+
+df1$tracing_deon_share <- coalesce(df1$tracing_deon_share_v1,
+                                          df1$tracing_deon_share_v2)
+
+df1$tracing_consq_share <- coalesce(df1$tracing_consq_share_v1,
+                                          df1$tracing_consq_share_v2)
+
+df1$tracing_deon_share_media <- coalesce(df1$tracing_deon_share_media_v1,
+                                          df1$tracing_deon_share_media_v2)
+
+df1$tracing_consq_share_media <- coalesce(df1$tracing_consq_share_media_v1,
+                                          df1$tracing_consq_share_media_v2)
+
+# PPE
+df1$ppe_deon_trustworthy <- coalesce(df1$ppe_deon_trustworthy_v1,
+                                          df1$ppe_deon_trustworthy_v2)
+
+df1$ppe_consq_trustworthy <- coalesce(df1$ppe_consq_trustworthy_v1,
+                                          df1$ppe_consq_trustworthy_v2)
+
+
+df1$ppe_deon_trust_other <- coalesce(df1$ppe_deon_trust_other_v1,
+                                          df1$ppe_deon_trust_other_v2)
+
+df1$ppe_consq_trust_other <- coalesce(df1$ppe_consq_trust_other_v1,
+                                          df1$ppe_consq_trust_other_v2)
+
+df1$ppe_deon_share <- coalesce(df1$ppe_deon_share_v1,
+                                          df1$ppe_deon_share_v2)
+
+df1$ppe_consq_share <- coalesce(df1$ppe_consq_share_v1,
+                                          df1$ppe_consq_share_v2)
+
+df1$ppe_deon_share_media <- coalesce(df1$ppe_deon_share_media_v1,
+                                          df1$ppe_deon_share_media_v2)
+
+df1$ppe_consq_share_media <- coalesce(df1$ppe_consq_share_media_v1,
+                                          df1$ppe_consq_share_media_v2)
+```
+
+***
+
+## Only accept the first HIT from an individual (based on duplicate IP addresses)
+```{r}
+df1 <- arrange(df1, RecordedDate) # Order by Date/Time
+df1$exclude <- 0 # Assign value of 0 to everyone
+dupes <- duplicated(df1$IPAddress) # Create logical vector based on IP address duplicates
+# df1[dupes,]$exclude <- 1 # Assign value of 1 to people to be excluded
+
+# df2<- filter(df1, exclude != 1) %>% # Create new dataframe excluding people
+  # select(-exclude) # Remove unneeded exclude variable
+
+# There are no duplicates so commented this out
+
+df2 <- df1
+
+exclusions_duplicates_IP <- nrow(df1) - nrow(df2)
+exclusions_duplicates_IP
+
+#After removing `r exclusions_duplicates_IP` duplicate cases there are now `r nrow(df2)` cases
+```
+
+***
+
+## Exclude people who failed the attention check
+
+```{r}
+df3 <- df2 %>% filter(is.na(attention1))
+
+exclusions_attention <- nrow(df2) - nrow(df3)
+exclusions_attention
+```
+#After removing `r exclusions_attention` duplicate cases there are now `r nrow(df3)` cases
+
+***
+
+## Create the final dataframe ```(df)``` to be used
+```{r results='hide'}
+# Remove columns from final dataframe
+df <- df2 %>% dplyr::select(-DistributionChannel, -IPAddress, -RecordedDate,
+                            -QID142, -QID143, -prolific_id) 
+```
+
+
+***
+
+```{r}
+df$consq_overall_trustworthy = rowMeans(df[,c("lockdown_consq_trustworthy",
+                                              "ventilator_consq_trustworthy",
+                                              "medicine_consq_trustworthy",
+                                              "ppe_consq_trustworthy",
+                                              "tracing_consq_trustworthy")],na.rm=TRUE)
+
+df$deon_overall_trustworthy = rowMeans(df[,c("lockdown_deon_trustworthy",
+                                              "ventilator_deon_trustworthy",
+                                              "medicine_deon_trustworthy",
+                                              "ppe_deon_trustworthy",
+                                              "tracing_deon_trustworthy")],na.rm=TRUE)
+
+df$consq_overall_trust_other = rowMeans(df[,c("lockdown_consq_trust_other",
+                                              "ventilator_consq_trust_other",
+                                              "medicine_consq_trust_other",
+                                              "ppe_consq_trust_other",
+                                              "tracing_consq_trust_other")],na.rm=TRUE)
+
+df$deon_overall_trust_other = rowMeans(df[,c("lockdown_deon_trust_other",
+                                              "ventilator_deon_trust_other",
+                                              "medicine_deon_trust_other",
+                                              "ppe_deon_trust_other",
+                                              "tracing_deon_trust_other")], na.rm=TRUE)
+```
+
+
+For each dilemma, we create composite trust scores for each agent seperately from the two indices (how trustworthy do you think the person is, and how much would you trust them on other issues).
+
+```{r}
+df$lockdown_deon_overall_trust = rowMeans(df[,c("lockdown_deon_trustworthy",
+                                "lockdown_deon_trust_other")], na.rm=TRUE)
+
+df$lockdown_consq_overall_trust = rowMeans(df[,c("lockdown_consq_trustworthy",
+                                "lockdown_consq_trust_other")], na.rm=TRUE)
+
+df$medicine_deon_overall_trust = rowMeans(df[,c("medicine_deon_trustworthy",
+                                "medicine_deon_trust_other")], na.rm=TRUE)
+
+df$medicine_consq_overall_trust = rowMeans(df[,c("medicine_consq_trustworthy",
+                                "medicine_consq_trust_other")], na.rm=TRUE)
+
+df$ppe_deon_overall_trust = rowMeans(df[,c("ppe_deon_trustworthy",
+                                "ppe_deon_trust_other")], na.rm=TRUE)
+
+df$ppe_consq_overall_trust = rowMeans(df[,c("ppe_consq_trustworthy",
+                                "ppe_consq_trust_other")], na.rm=TRUE)
+
+df$tracing_deon_overall_trust = rowMeans(df[,c("tracing_deon_trustworthy",
+                                "tracing_deon_trust_other")], na.rm=TRUE)
+
+df$tracing_consq_overall_trust = rowMeans(df[,c("tracing_consq_trustworthy",
+                                "tracing_consq_trust_other")], na.rm=TRUE)
+
+df$ventilator_deon_overall_trust = rowMeans(df[,c("ventilator_deon_trustworthy",
+                                "ventilator_deon_trust_other")], na.rm=TRUE)
+
+df$ventilator_consq_overall_trust = rowMeans(df[,c("ventilator_consq_trustworthy",
+                                "ventilator_consq_trust_other")], na.rm=TRUE)
+```
+
+We then create overall trust scores for each agent across the dilemmas: a) overall, and then for b) the IH and c) IB dilemmas seperately.
+
+```{r}
+df$consq_overall_trust = rowMeans(df[,c("lockdown_consq_trust_other",
+                                              "ventilator_consq_trust_other",
+                                              "medicine_consq_trust_other",
+                                              "ppe_consq_trust_other",
+                                              "tracing_consq_trust_other",
+                                              "lockdown_consq_trustworthy",
+                                              "ventilator_consq_trustworthy",
+                                              "medicine_consq_trustworthy",
+                                              "ppe_consq_trustworthy",
+                                              "tracing_consq_trustworthy")],na.rm=TRUE)
+
+df$consq_trust_IH = rowMeans(df[,c("lockdown_consq_trust_other",
+                                              "ventilator_consq_trust_other",
+                                              "tracing_consq_trust_other",
+                                              "lockdown_consq_trustworthy",
+                                              "ventilator_consq_trustworthy",
+                                              "tracing_consq_trustworthy")],na.rm=TRUE)
+
+df$consq_trust_IB = rowMeans(df[,c("medicine_consq_trust_other",
+                                              "ppe_consq_trust_other",
+                                              "medicine_consq_trustworthy",
+                                              "ppe_consq_trustworthy")],na.rm=TRUE)
+
+df$deon_overall_trust = rowMeans(df[,c("lockdown_deon_trust_other",
+                                              "ventilator_deon_trust_other",
+                                              "medicine_deon_trust_other",
+                                              "ppe_deon_trust_other",
+                                              "tracing_deon_trust_other",
+                                              "lockdown_deon_trustworthy",
+                                              "ventilator_deon_trustworthy",
+                                              "medicine_deon_trustworthy",
+                                              "ppe_deon_trustworthy",
+                                              "tracing_deon_trustworthy")],na.rm=TRUE)
+
+df$deon_trust_IH = rowMeans(df[,c("lockdown_deon_trust_other",
+                                              "ventilator_deon_trust_other",
+                                              "tracing_deon_trust_other",
+                                              "lockdown_deon_trustworthy",
+                                              "ventilator_deon_trustworthy",
+                                              "tracing_deon_trustworthy")],na.rm=TRUE)
+
+df$deon_trust_IB = rowMeans(df[,c("medicine_deon_trust_other",
+                                  "ppe_deon_trust_other",
+                                  "medicine_deon_trustworthy",
+                                  "ppe_deon_trustworthy")],na.rm=TRUE)
+
+```
+
+And then we do the same for the composite sharing DV.
+
+```{r}
+df$consq_overall_share = rowMeans(df[,c("lockdown_consq_share",
+                                        "lockdown_consq_share_media",
+                                        "ventilator_consq_share",
+                                        "ventilator_consq_share_media",
+                                        "medicine_consq_share",
+                                        "medicine_consq_share_media",
+                                        "ppe_consq_share",
+                                        "ppe_consq_share_media",
+                                        "tracing_consq_share",
+                                        "tracing_consq_share_media")],na.rm=TRUE)
+
+df$consq_share_IH = rowMeans(df[,c("lockdown_consq_share",
+                                        "lockdown_consq_share_media",
+                                        "ventilator_consq_share",
+                                        "ventilator_consq_share_media",
+                                        "tracing_consq_share",
+                                        "tracing_consq_share_media")],na.rm=TRUE)
+
+df$consq_share_IB = rowMeans(df[,c("medicine_consq_share",
+                                        "medicine_consq_share_media",
+                                        "ppe_consq_share",
+                                        "ppe_consq_share_media")],na.rm=TRUE)
+
+df$deon_overall_share = rowMeans(df[,c("lockdown_deon_share",
+                                       "lockdown_deon_share_media",
+                                       "ventilator_deon_share",
+                                       "ventilator_deon_share_media",
+                                       "medicine_deon_share",
+                                       "medicine_deon_share_media",
+                                       "ppe_deon_share",
+                                       "ppe_deon_share_media",
+                                       "tracing_deon_share",
+                                       "tracing_deon_share_media")], na.rm=TRUE)
+
+df$deon_share_IH = rowMeans(df[,c("lockdown_deon_share",
+                                       "lockdown_deon_share_media",
+                                       "ventilator_deon_share",
+                                       "ventilator_deon_share_media",
+                                       "tracing_deon_share",
+                                       "tracing_deon_share_media")], na.rm=TRUE)
+
+df$deon_share_IB = rowMeans(df[,c("medicine_deon_share",
+                                       "medicine_deon_share_media",
+                                       "ppe_deon_share",
+                                       "ppe_deon_share_media")], na.rm=TRUE)
+```
+
+## Composite support items
+```{r}
+df$support_overall = rowMeans(df[,c("lockdown_support",
+                                    "ventilator_support",
+                                    "medicine_support",
+                                    "ppe_support",
+                                    "tracing_support")],na.rm=TRUE)
+
+df$support_IB = rowMeans(df[,c("medicine_support","ppe_support")], na.rm=TRUE)
+
+df$support_IH = rowMeans(df[,c("lockdown_support","ventilator_support","tracing_support")],
+                              na.rm=TRUE)
+```
+
+## Composite wrong items
+```{r}
+df$lockdown_wrong <- recode(df$lockdown_wrong,
+             `-3` = 1,
+             `-2` = 2,
+             `-1` = 3,
+             `0` = 4,
+             `1` = 5,
+             `2` = 6,
+             `3` = 7)
+
+df$ventilator_wrong <- recode(df$ventilator_wrong,
+             `-3` = 1,
+             `-2` = 2,
+             `-1` = 3,
+             `0` = 4,
+             `1` = 5,
+             `2` = 6,
+             `3` = 7)
+
+df$tracing_wrong <- recode(df$tracing_wrong,
+             `-3` = 1,
+             `-2` = 2,
+             `-1` = 3,
+             `0` = 4,
+             `1` = 5,
+             `2` = 6,
+             `3` = 7)
+
+df$medicine_wrong <- recode(df$medicine_wrong,
+             `-3` = 1,
+             `-2` = 2,
+             `-1` = 3,
+             `0` = 4,
+             `1` = 5,
+             `2` = 6,
+             `3` = 7)
+
+df$ppe_wrong <- recode(df$ppe_wrong,
+             `-3` = 1,
+             `-2` = 2,
+             `-1` = 3,
+             `0` = 4,
+             `1` = 5,
+             `2` = 6,
+             `3` = 7)
+
+df$wrong_overall = rowMeans(df[,c("lockdown_wrong",
+                                    "ventilator_wrong",
+                                    "medicine_wrong",
+                                    "ppe_wrong",
+                                    "tracing_wrong")],na.rm=TRUE)
+
+df$wrong_IB = rowMeans(df[,c("medicine_wrong","ppe_wrong")],na.rm=TRUE)
+
+df$wrong_IH = rowMeans(df[,c("lockdown_wrong","ventilator_wrong","tracing_wrong")],na.rm=TRUE)
+```
+
+## Composite policy attitude
+```{r}
+ 
+df$policy_attitude <- rowMeans(df[,c("lockdown_wrong",
+                                    "ventilator_wrong",
+                                    "medicine_wrong",
+                                    "ppe_wrong",
+                                    "tracing_wrong",
+                                    "lockdown_support",
+                                    "ventilator_support",
+                                    "medicine_support",
+                                    "ppe_support",
+                                    "tracing_support")],
+                               na.rm=TRUE)
+
+df$policy_attitude_IB <- rowMeans(df[,c("medicine_wrong", "medicine_support",
+                                        "ppe_wrong", "ppe_support")],na.rm=TRUE)
+
+df$policy_attitude_IH = rowMeans(df[,c("lockdown_wrong","lockdown_support",
+                                       "ventilator_wrong","ventilator_support",
+                                       "tracing_wrong", "tracing_support")],na.rm=TRUE)
+```
+
+```{r}
+df$lockdown_policy_attitude <- rowMeans(df[,c("lockdown_wrong","lockdown_support")],
+                               na.rm=TRUE)
+
+df$ventilator_policy_attitude <- rowMeans(df[,c("ventilator_wrong","ventilator_support")],
+                               na.rm=TRUE)
+
+df$tracing_policy_attitude <- rowMeans(df[,c("tracing_wrong","tracing_support")],
+                               na.rm=TRUE)
+
+df$ppe_policy_attitude <- rowMeans(df[,c("ppe_wrong","ppe_support")],
+                               na.rm=TRUE)
+
+df$medicine_policy_attitude <- rowMeans(df[,c("medicine_wrong","medicine_support")],
+                               na.rm=TRUE)
+                                           
+```
+
+
+```{r}
+df$impartial_beneficence = rowMeans(df[,c("OUS1", "OUS2", "OUS3", "OUS4", "OUS5")], na.rm=TRUE)
+df$instrumental_harm = rowMeans(df[,c("OUS6", "OUS7", "OUS8", "OUS9")], na.rm=TRUE)
+```
+
+
+```{r, results='asis'}
+dfSummary(df, plain.ascii = FALSE, style = "grid")
+```
+
+## Save to csv
+```{r}
+write.csv(df, file = "../Data/CLP_Pilot1_Data.csv",row.names=FALSE)
+```

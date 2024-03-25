@@ -1,0 +1,703 @@
+---
+title: "S4 (Supplement Study 4)"
+output:
+  html_document:
+    number_sections: yes
+    self_contained: yes
+    toc: yes
+    toc_float: yes
+    code_folding: hide
+---
+
+Last update: 10/09/2023
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+
+library(dplyr)
+library(tidyr)
+library(lmtest)
+library(sandwich)
+library(ggpubr)
+library(ggplot2)
+library(sjPlot)
+library(reshape2)
+library(stringr)
+library(gmodels)
+library(splithalfr)
+library(RColorBrewer)
+library(countrycode)
+
+knitr::opts_chunk$set(warning = FALSE)
+knitr::opts_chunk$set(message = FALSE)
+# hide code chunks 
+# knitr::opts_chunk$set(echo = FALSE)
+
+data <- readRDS("data_study_4.RDS")
+
+data$country <- ifelse(data$country  == "GB", "UK", data$country)
+countries <- unique(data$country)
+
+data$RECAP_SCORE <- 8-rowMeans(data[,c("RECAP_ineff_measures", "RECAP_liberties")], na.rm=TRUE)
+data$CHAOS_SCORE <- rowMeans(data[,c("CHAOS_1", "CHAOS_2", "CHAOS_3")], na.rm=TRUE)
+
+```
+
+# Visualization
+
+```{r}
+
+theme_vars <- theme(
+  strip.background = element_blank(),
+  legend.position="right",
+  plot.title = element_text(colour="#000000",size=10,hjust=0,angle=0,vjust=.5,face="bold"),
+  plot.subtitle = element_text(colour="#000000",size=10,hjust=0,angle=0,vjust=.5,face="plain"),
+  axis.text.x = element_text(colour="#000000",size=10,hjust=.5,angle=0,vjust=.5,face="plain"),
+  axis.text.y = element_text(colour="#000000",size=10,hjust=1,angle=0,face="plain"),  
+  axis.title.x = element_text(colour="#000000",size=10,angle=0,hjust=.5,vjust=0,face="plain"),
+  axis.title.y = element_text(colour="#000000",size=10,angle=90,hjust=.5,vjust=3,face="plain"),
+  legend.title= element_text(colour="#000000",size=10,hjust=.5,angle=0,face="plain"),
+  legend.text= element_text(colour="#000000",size=10,hjust=0,angle=0,face="plain"),
+  strip.text.x = element_text(colour="#000000",size=10,hjust=0,angle=0,face="plain"),
+  strip.text.y = element_text(colour="#000000",size=10,hjust=0,angle=0,face="bold"),
+  legend.key=element_blank()
+)
+
+data$DIFF_gov_effec <- data$RECALL_frac_gov_effec - data$TRUTH_frac_gov_effec
+data$DIFF_severity <- data$RECALL_frac_severity - data$TRUTH_frac_severity
+data$DIFF_infec_prop <- data$RECALL_frac_infec_prop - data$TRUTH_frac_infec_prop
+
+variables <- c("DIFF_gov_effec", "DIFF_severity", "DIFF_infec_prop")
+
+measurements <- melt(data[,c("ResponseId", "country", variables)], id=c("ResponseId", "country"))
+
+summary <- measurements %>% dplyr::group_by(country, variable) %>% dplyr::summarise(
+  M = mean(value, na.rm=TRUE),
+  CILO = gmodels::ci(value, na.rm=TRUE)[2],
+  CIHI = gmodels::ci(value, na.rm=TRUE)[3]
+)
+
+figure_panel_A <- ggplot(
+  data = summary, 
+) + geom_linerange(
+  #width = 0.2,
+  aes(x = variable, ymin = CILO, ymax = CIHI, group=country, color=country), 
+  position = position_dodge(-0.5)
+) + geom_point(
+  aes(x = variable, y = M, group=country, color=country),
+  position = position_dodge(-0.5), fill = "#ffffff"
+) + scale_shape_manual(
+  name = "",
+  labels = c(
+    "T1" = "Truth",
+    "BIAS" = "Bias",
+    "RE" = "Recall"
+  ),
+  values = c(
+    "T1" = 19,
+    "BIAS" = 21,
+    "RE" = 4
+  )
+) + theme_classic(
+  
+) + scale_color_manual(
+  name = "",
+  values = brewer.pal(n = 10, name = 'Paired'),
+  labels = c("GB" = "UK")
+) + scale_x_discrete(
+  name = "",
+  labels = c(
+    "DIFF_severity" = "Severity",
+    "DIFF_infec_prop" = "Infection\nprobability",
+    "DIFF_gov_effec" = "Government\neffectiveness"
+  )
+) + scale_y_continuous(
+  name = "\nEstimated - real share [pp]",
+  expand = c(0,0)
+) + coord_flip(ylim = c(-60,60)) + theme(legend.position="bottom") + geom_hline(yintercept = 0, linetype="dashed"
+) + theme(legend.position="right") + theme_vars
+
+```
+
+```{r}
+
+variables <- c("CHAOS_SCORE", "CONSEQ_compliance_new_pan", "CONSEQ_punish_scien", "CONSEQ_punish_pol", "RECAP_SCORE")
+
+measurements <- melt(data[,c("ResponseId", "country", variables)], id=c("ResponseId", "country"))
+
+summary <- measurements %>% dplyr::group_by(country, variable) %>% dplyr::summarise(
+  M = mean(value, na.rm=TRUE),
+  CILO = gmodels::ci(value, na.rm=TRUE)[2],
+  CIHI = gmodels::ci(value, na.rm=TRUE)[3]
+)
+
+figure_panel_B <- ggplot(
+  data = summary, 
+) + geom_linerange(
+  #width = 0.2,
+  aes(x = variable, ymin = CILO, ymax = CIHI, group=country, color=country), 
+  position = position_dodge(-0.5)
+) + geom_point(
+  aes(x = variable, y = M, group=country, color=country),
+  position = position_dodge(-0.5), fill = "#ffffff"
+) + scale_shape_manual(
+  name = "",
+  labels = c(
+    "T1" = "Truth",
+    "BIAS" = "Bias",
+    "RE" = "Recall"
+  ),
+  values = c(
+    "T1" = 19,
+    "BIAS" = 21,
+    "RE" = 4
+  )
+) + theme_classic(
+  
+) + scale_color_manual(
+  name = "",
+  values = brewer.pal(n = 10, name = 'Paired'),
+  labels = c("GB" = "UK")
+) + scale_x_discrete(
+  name = "",
+  labels = c(
+    "RECAP_SCORE" = "Appropriateness\nof political action",
+    "CONSEQ_compliance_new_pan" = "Future\ncompliance",
+    "CONSEQ_punish_pol" = "Punishing\npoliticians",
+    "CONSEQ_punish_scien" = "Punishing\nscientists",
+    "CHAOS_SCORE" = "Need for\nchaos"
+  )
+) + scale_y_continuous(
+  name = "\nAgreement",
+  expand = c(0,0),
+  breaks = c(1:7)
+) + coord_flip(ylim = c(1,7)) + theme(legend.position="bottom") + geom_hline(yintercept = 0, linetype="dashed"
+) + theme(legend.position="right") + theme_vars
+ 
+```
+
+```{r}
+scale_vars_1 <- scale_linetype_manual(
+  name="",
+  labels = c(
+    "0" = "Unvaccinated",
+    "1" = "Vaccinated"
+  ),
+  values = c("solid", "dotted")
+) 
+scale_vars_2 <-  scale_color_manual(
+  name="",
+  labels = c(
+    "0" = "Unvaccinated",
+    "1" = "Vaccinated"
+  ),
+  values = c("#FFADAD", "#93B5C6")
+) 
+scale_vars_3 <- scale_fill_manual(
+  name="",
+  labels = c(
+    "0" = "Unvaccinated",
+    "1" = "Vaccinated"
+  ),
+  values = c("#FFADAD", "#93B5C6")
+)
+
+countrycolors <- brewer.pal(n = 10, name = 'Paired')
+countrynames <- c("AU", "DE", "ES", "IT", "JP", "KR", "MX", "SE", "UK", "US")
+
+countrycolors <- setNames(countrycolors, countrynames)
+
+plot_inter <- function(dataset, title_plot,number_loop){
+  model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, dataset)
+  plot_model(model, type = "int") +
+  scale_x_continuous(
+    name = ifelse(number_loop %in% c(6:10), "Identification", ""),
+    expand = c(0,0),
+    breaks = c(1:7)
+  ) +
+  scale_y_continuous(
+    expand = c(0,0),
+    breaks = c(1:7)
+  ) + ylab("")+ scale_color_manual(values = c("#FF7000", "#8D9EFF"), name = "") + coord_cartesian(expand = 0, xlim=c(1,7), ylim=c(1,7)) +
+  theme_classic() + theme_vars + theme( legend.position="bottom", plot.title = element_text(hjust = 0), legend.title=element_blank(),legend.background = element_blank()) + 
+  ggtitle(title_plot)+  if (number_loop %in% c(1,6)) ylab("\nAppropriateness of\npolitical action") 
+}
+
+plots <- list()
+
+for (i in seq_along(countrynames)) {
+
+  data_country <- data[data$country == countrynames[i], ]
+  
+  country_name_full <- countrynames[i]
+
+  model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data_country)
+
+    plots[[countrynames[i]]] <-  plot_inter(data_country, country_name_full,i) 
+}
+
+figure_panel_C <- ggpubr::ggarrange(plotlist=plots, nrow = 2, ncol = 5,common.legend = TRUE, legend = "bottom", labels = c("C"), widths = c(1.2,1,1,1,1))
+```
+
+```{r}
+
+fig3_part_1 <- ggarrange(figure_panel_A, figure_panel_B, nrow = 1, ncol = 2, common.legend = TRUE, legend = "right", labels = c("A", "B"), align = "hv")
+
+
+fig3 <- ggarrange(fig3_part_1, figure_panel_C, common.legend = TRUE, legend = "bottom", ncol=1, heights = c(1,1.3), align="hv")
+fig3
+
+png("fig_3.png",height=20,width=22,units="cm",res=300)
+print(fig3)
+
+pdf("fig_3.pdf",height=8,width=10)
+print(fig3)
+dev.off()
+
+```
+
+## Supporting statistics
+
+### Estimation percentages (Figure part A)
+
+```{r}
+
+#table(data[is.na(data$DIFF_infec_prop),]$DIFF_infec_prop, data[is.na(data$DIFF_infec_prop),]$country, exclude = NULL) 
+#table(data[is.na(data$DIFF_severity),]$DIFF_severity, data[is.na(data$DIFF_severity),]$country, exclude = NULL) 
+#table(data[is.na(data$DIFF_gov_effec),]$DIFF_infec_prop, data[is.na(data$DIFF_gov_effec),]$country, exclude = NULL) 
+
+data$DIFF_infec_prop_above0 <- ifelse(data$DIFF_infec_prop > 0, 1, 0)
+data$DIFF_severity_below0 <- ifelse(data$DIFF_severity < 0, 1, 0)
+data$DIFF_gov_effec_above0 <- ifelse(data$DIFF_gov_effec > 0, 1, 0)
+
+tbl <- data %>% group_by(country) %>% summarise(
+  PCT_PROB_OVEREST = round(mean(DIFF_infec_prop_above0, na.rm=TRUE)*100),
+  PCT_SEVERITY_UNDEREST = round(mean(DIFF_severity_below0, na.rm=TRUE)*100),
+  PCT_GOVEFF_OVEREST = round(mean(DIFF_gov_effec_above0, na.rm=TRUE)*100) 
+) 
+tbl
+print(xtable::xtable(tbl, digits=0), type="html", "out.html")
+
+```
+
+### Appropriateness ratings (Figure part B)
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  RECAP_M_SD = paste0(round(mean(RECAP_SCORE, na.rm=TRUE),2), " (", round(sd(RECAP_SCORE, na.rm=TRUE),2), ")")
+) 
+tbl
+print(xtable::xtable(tbl, digits=2), type="html", "out.html")
+
+
+```
+
+Differences between countries:
+
+```{r}
+
+rstatix::cohens_d(data, RECAP_SCORE ~ country) %>% arrange(effsize)
+
+```
+
+Extremes: Spain and Sweden
+
+```{r}
+
+mean(data[data$country == "ES",]$RECAP_SCORE, na.rm = TRUE)
+sd(data[data$country == "ES",]$RECAP_SCORE, na.rm = TRUE)
+
+mean(data[data$country == "SE",]$RECAP_SCORE, na.rm = TRUE)
+sd(data[data$country == "SE",]$RECAP_SCORE, na.rm = TRUE)
+
+```
+
+### Need for chaos and punishing (Figure part B)
+
+```{r}
+
+data$CHAOS_SCORE_HIGH <- ifelse(data$CHAOS_SCORE > 4, 1, 0)
+data$PUNISH_SCIENTISTS_HIGH <- ifelse(data$CONSEQ_punish_scien > 4, 1, 0)
+data$PUNISH_POLITICIANS_HIGH <- ifelse(data$CONSEQ_punish_pol > 4, 1, 0)
+data$COMPLY_FUTUREPAND_HIGH <- ifelse(data$CONSEQ_compliance_new_pan > 4, 1, 0)
+
+tbl <- data %>% group_by(country) %>% summarise(
+  PCT_CHAOS_HIGH = mean(CHAOS_SCORE_HIGH, na.rm=TRUE)*100,
+  PCT_PUNISH_SCIENTISTS_HIGH = mean(PUNISH_SCIENTISTS_HIGH, na.rm=TRUE)*100,
+  PCT_PUNISH_POLITICIANS_HIGH = mean(PUNISH_POLITICIANS_HIGH, na.rm=TRUE)*100,
+  PCT_COMPLY_FUTUREPAND_HIGH = mean(COMPLY_FUTUREPAND_HIGH, na.rm=TRUE)*100,
+  PCT_VOTING = mean(CONSEQ_voting_dummy, na.rm=TRUE)*100,
+) 
+tbl
+print(xtable::xtable(tbl, digits=0), type="html", "out.html")
+
+
+```
+
+
+
+# Associations of appropriateness of political action
+
+## with recalled infection probability
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  COR_RECAP_SCORE = cor.test(RECALL_frac_infec_prop, RECAP_SCORE, use="pairwise.complete.obs")$estimate,
+  COR_RECAP_SCORE_P = cor.test(RECALL_frac_infec_prop, RECAP_SCORE, use="pairwise.complete.obs")$p.value,
+  #COR_RECAP_ineff_measures = cor(RECALL_frac_infec_prop, RECAP_ineff_measures, use="pairwise.complete.obs"),
+  #COR_RECAP_liberties = cor(RECALL_frac_infec_prop, RECAP_liberties, use="pairwise.complete.obs")
+) #%>% arrange(COR_RECAP_SCORE)
+tbl
+print(xtable::xtable(tbl, digits=c(2,2,2,3)), type="html", "out.html")
+
+```
+
+## with recalled infection severity
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  COR_RECAP_SCORE = cor.test(RECALL_frac_severity, RECAP_SCORE, use="pairwise.complete.obs")$estimate,
+  COR_RECAP_SCORE_P = cor.test(RECALL_frac_severity, RECAP_SCORE, use="pairwise.complete.obs")$p.value,
+  #COR_RECAP_ineff_measures = cor(RECALL_frac_severity, RECAP_ineff_measures, use="pairwise.complete.obs"),
+  #COR_RECAP_liberties = cor(RECALL_frac_severity, RECAP_liberties, use="pairwise.complete.obs")
+) #%>% arrange(COR_RECAP_SCORE)
+tbl
+print(xtable::xtable(tbl, digits=c(2,2,2,3)), type="html", "out.html")
+
+```
+
+## with recalled goverment effectiveness
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  COR_RECAP_SCORE = cor.test(RECALL_frac_gov_effec, RECAP_SCORE, use="pairwise.complete.obs")$estimate,
+  COR_RECAP_SCORE_P = cor.test(RECALL_frac_gov_effec, RECAP_SCORE, use="pairwise.complete.obs")$p.value,
+  #COR_RECAP_ineff_measures = cor(RECALL_frac_gov_effec, RECAP_ineff_measures, use="pairwise.complete.obs"),
+  #COR_RECAP_liberties = cor(RECALL_frac_gov_effec, RECAP_liberties, use="pairwise.complete.obs")
+) #%>% arrange(COR_RECAP_SCORE)
+tbl
+print(xtable::xtable(tbl, digits=c(2,2,2,3)), type="html", "out.html")
+
+```
+
+## with desire to punish politicians
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  COR_RECAP_SCORE = cor.test(CONSEQ_punish_pol, RECAP_SCORE, use="pairwise.complete.obs")$estimate,
+  COR_RECAP_SCORE_P = cor.test(CONSEQ_punish_pol, RECAP_SCORE, use="pairwise.complete.obs")$p.value,
+  #COR_RECAP_ineff_measures = cor(CONSEQ_punish_pol, RECAP_ineff_measures, use="pairwise.complete.obs"),
+  #COR_RECAP_liberties = cor(CONSEQ_punish_pol, RECAP_liberties, use="pairwise.complete.obs")
+) #%>% arrange(COR_RECAP_SCORE)
+print(xtable::xtable(tbl, digits=c(2,2,2,3)), type="html", "out.html")
+
+```
+
+
+## with desire to punish scientists
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  COR_RECAP_SCORE = cor.test(CONSEQ_punish_scien, RECAP_SCORE, use="pairwise.complete.obs")$estimate,
+  COR_RECAP_SCORE_P = cor.test(CONSEQ_punish_scien, RECAP_SCORE, use="pairwise.complete.obs")$p.value,
+  #COR_RECAP_ineff_measures = cor(CONSEQ_punish_scien, RECAP_ineff_measures, use="pairwise.complete.obs"),
+  #COR_RECAP_liberties = cor(CONSEQ_punish_scien, RECAP_liberties, use="pairwise.complete.obs")
+) #%>% arrange(COR_RECAP_SCORE)
+print(xtable::xtable(tbl, digits=c(2,2,2,3)), type="html", "out.html")
+
+```
+
+## with voting behavior
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  COR_RECAP_SCORE = cor.test(CONSEQ_voting_dummy, RECAP_SCORE, use="pairwise.complete.obs")$estimate,
+  COR_RECAP_SCORE_P = cor.test(CONSEQ_voting_dummy, RECAP_SCORE, use="pairwise.complete.obs")$p.value,
+  #COR_RECAP_ineff_measures = cor(CONSEQ_voting_dummy, RECAP_ineff_measures, use="pairwise.complete.obs"),
+  #COR_RECAP_liberties = cor(CONSEQ_voting_dummy, RECAP_liberties, use="pairwise.complete.obs")
+) #%>% arrange(COR_RECAP_SCORE)
+print(xtable::xtable(tbl, digits=c(2,2,2,3)), type="html", "out.html")
+
+```
+
+## with need for chaos
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  COR_RECAP_SCORE = cor.test(CHAOS_SCORE, RECAP_SCORE, use="pairwise.complete.obs")$estimate,
+  COR_RECAP_SCORE_P = cor.test(CHAOS_SCORE, RECAP_SCORE, use="pairwise.complete.obs")$p.value,
+  #COR_RECAP_ineff_measures = cor(CONSEQ_voting_dummy, RECAP_ineff_measures, use="pairwise.complete.obs"),
+  #COR_RECAP_liberties = cor(CONSEQ_voting_dummy, RECAP_liberties, use="pairwise.complete.obs")
+) #%>% arrange(COR_RECAP_SCORE)
+print(xtable::xtable(tbl, digits=c(2,2,2,3)), type="html", "out.html")
+
+```
+
+## with compliance in next pandemic
+
+```{r}
+
+tbl <- data %>% group_by(country) %>% summarise(
+  COR_RECAP_SCORE = cor.test(CONSEQ_compliance_new_pan, RECAP_SCORE, use="pairwise.complete.obs")$estimate,
+  COR_RECAP_SCORE_P = cor.test(CONSEQ_compliance_new_pan, RECAP_SCORE, use="pairwise.complete.obs")$p.value,
+  #COR_RECAP_ineff_measures = cor(CONSEQ_compliance_new_pan, RECAP_ineff_measures, use="pairwise.complete.obs"),
+  #COR_RECAP_liberties = cor(CONSEQ_compliance_new_pan, RECAP_liberties, use="pairwise.complete.obs")
+) #%>% arrange(COR_RECAP_SCORE)
+print(xtable::xtable(tbl, digits=c(2,2,2,3)), type="html", "out.html")
+
+
+```
+
+# Regression of appropriateness ratings on vaccination status and identification
+
+## Australia
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "AU",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## Germany
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "DE",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## Spain
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "ES",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## Italy
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "IT",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## Japan
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "JP",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## South Korea
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "KR",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## Mexico
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "MX",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## Sweden
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "SE",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## United Kingdom
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "UK",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+## United States
+
+```{r}
+
+model <- lm(RECAP_SCORE ~ VSI * VACSTATUS, data = data[data$country == "US",])
+tab_model(model, dv.labels = c("Appropriateness rating"), pred.labels = c(
+  "VSI" = "Vaccination status identification",
+  "VACSTATUSVaccinated" = "Vaccinated (Baseline: unvaccinated)",
+  "VSI:VACSTATUSVaccinated" = "Interaction: Vaccinated x Identification"
+), show.se = TRUE)
+
+```
+
+
+# Demographics
+
+## Sample sizes
+
+```{r}
+
+table(data$country)
+
+```
+
+## Age
+
+```{r}
+
+psych::describe(as.integer(data$age))
+
+```
+
+## Gender
+
+```{r}
+
+prop.table(table(data$gender))
+
+```
+
+## Comparison by country
+
+```{r}
+
+data$age. <- as.integer(data$age)
+
+comparisons <-compareGroups::compareGroups(country ~ age. + gender, data = data[data$country %in% c("AU", "DE", "ES", "IT", "JP"),])
+compareGroups::createTable(comparisons)
+
+comparisons <-compareGroups::compareGroups(country ~ age. + gender, data = data[data$country %in% c("KR", "MX", "SE", "UK", "US"),])
+compareGroups::createTable(comparisons)
+
+```
+
+## Comparison by vaccination status
+
+```{r}
+
+data$age. <- as.integer(data$age)
+comparisons <-compareGroups::compareGroups(vaccinated ~ age. + gender, data = data)
+compareGroups::createTable(comparisons, show.all=TRUE)
+
+```
+
+## Vaccination status by country
+
+```{r}
+
+prop.table(table(data$country, data$VACSTATUS), margin = 1)
+
+```
+
+
+# Scale consistencies
+
+## Vaccination status identification
+
+```{r}
+
+data$IDENT_1 <- ifelse(!is.na(data$vsi_vax_1),data$vsi_vax_1,data$vsi_no_vax_1)
+data$IDENT_2 <- ifelse(!is.na(data$vsi_vax_2),data$vsi_vax_2,data$vsi_no_vax_2)
+data$IDENT_3 <- ifelse(!is.na(data$vsi_vax_3),data$vsi_vax_3,data$vsi_no_vax_3)
+data$IDENT_4 <- ifelse(!is.na(data$vsi_vax_4),data$vsi_vax_4,data$vsi_no_vax_4)
+data$IDENT_5 <- ifelse(!is.na(data$vsi_vax_5),data$vsi_vax_5,data$vsi_no_vax_5)
+
+psych::alpha(data[c("IDENT_1", "IDENT_2", "IDENT_3", "IDENT_4", "IDENT_5")])
+
+```
+
+## Need for chaos
+
+```{r}
+
+psych::alpha(data[c("CHAOS_1", "CHAOS_2", "CHAOS_3")])
+
+```
+
+## NA analysis
+
+```{r}
+
+table(data$country, data$RECALL_frac_gov_effec, exclude = NULL)
+table(data$country, data$RECALL_frac_severity, exclude = NULL)
+table(data$country, data$RECAP_ineff_measures, exclude = NULL)
+
+nas <- data[is.na(data$RECAP_ineff_measures),]
+
+table(nas$country, nas$RECAP_ineff_measures, exclude = NULL)
+table(nas$country, nas$RECAP_liberties, exclude = NULL)
+table(nas$country, nas$CHAOS_1, exclude = NULL)
+table(nas$country, nas$CHAOS_2, exclude = NULL)
+table(nas$country, nas$CHAOS_3, exclude = NULL)
+table(nas$country, nas$CHAOS_1, exclude = NULL)
+table(nas$country, nas$RECALL_frac_gov_effec, exclude = NULL)
+table(nas$country, nas$RECALL_frac_severity, exclude = NULL)
+table(nas$country, nas$CONSEQ_compliance_new_pan, exclude = NULL)
+table(nas$country, nas$CONSEQ_punish_scien, exclude = NULL)
+table(nas$country, nas$CONSEQ_punish_pol, exclude = NULL)
+table(nas$country, nas$IDENT_1, exclude = NULL)
+table(nas$country, nas$IDENT_2, exclude = NULL)
+table(nas$country, nas$IDENT_3, exclude = NULL)
+table(nas$country, nas$IDENT_4, exclude = NULL)
+table(nas$country, nas$IDENT_5, exclude = NULL)
+
+
+```
+
